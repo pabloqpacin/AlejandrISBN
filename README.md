@@ -27,12 +27,15 @@ docker compose down -v       # ¡borra también Postgres!
 ## Seeds / bootstrap DB
 
 - **Primer arranque del volumen:** SQL en `postgres/init/` (entrypoint oficial de Postgres).
-- **Día a día:** deja `*.json` o `*.sql` en `seed/` → la API los aplica al arrancar (idempotente por checksum).
+- **Día a día:** deja `*.json`, `*.csv` o `*.sql` en `seed/` → la API los aplica al arrancar (idempotente por checksum).
+  - **JSON** → escribe filas directamente en la DB
+  - **CSV** → lookup online por cada ISBN, luego inserta (puedes pasar `location`, `notes`, etc.)
 
 Ver `seed/README.md`.
 
 ```bash
 cp seed/books.example.json seed/books.json
+# o: cp seed/books.example.csv seed/books.csv
 docker compose restart alejandrisbn
 ```
 

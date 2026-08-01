@@ -2,7 +2,9 @@ import hashlib
 import json
 import logging
 import os
+from csv import DictReader
 from datetime import datetime
+from io import StringIO
 from pathlib import Path
 from typing import Any, Optional
 
@@ -12,6 +14,7 @@ logger = logging.getLogger("alejandrisbn.seed")
 
 SEED_DIR = Path(os.getenv("SEED_DIR", Path(__file__).resolve().parent.parent / "seed"))
 
+SEED_SUFFIXES = {".json", ".sql", ".csv"}
 
 
 def _parse_ts(value: Any) -> Optional[datetime]:
@@ -31,6 +34,13 @@ def _parse_ts(value: Any) -> Optional[datetime]:
     return None
 
 
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "t", "yes", "y", "si", "sí"}
+
+
 def _checksum(path: Path) -> str:
     digest = hashlib.sha256()
     digest.update(path.read_bytes())
@@ -41,7 +51,6 @@ def _split_sql(script: str) -> list[str]:
     """Split a SQL file into statements (no dollar-quoting support; keep seeds simple)."""
     statements: list[str] = []
     for chunk in script.split(";"):
-        # drop full-line comments
         lines = []
         for line in chunk.splitlines():
             stripped = line.strip()
@@ -96,6 +105,70 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
             }
         )
     return cleaned
+
+
+def _csv_rows(path: Path) -> list[dict[str, str]]:
+    text = path.read_text(encoding="utf-8-sig")
+    reader = DictReader(StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError(f"CSV seed {path.name} has no header row")
+    fields = {name.strip().lower(): name for name in reader.fieldnames if name}
+    if "isbn" not in fields:
+        raise ValueError(f"CSV seed {path.name} must include an 'isbn' column")
+
+    rows: list[dict[str, str]] = []
+    for raw in reader:
+        normalized = {
+            key.strip().lower(): (raw.get(original) or "").strip()
+            for key, original in fields.items()
+        }
+        if not any(normalized.values()):
+            continue
+        rows.append(normalized)
+    return rows
+
+
+def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, Any]:
+    """Build a book row from online lookup metadata + optional CSV overrides.
+
+    Lookup always wins for bibliographic fields (title, authors, year, publisher,
+    cover, description, source). CSV may still set library fields: location, notes,
+    genre, favourite.
+    """
+    book = {
+        "isbn": _normalize_isbn(row.get("isbn") or meta.get("isbn") or ""),
+        "title": meta.get("title") or "",
+        "authors": meta.get("authors") or "",
+        "publication_year": meta.get("publication_year"),
+        "genre": meta.get("genre") or "",
+        "publisher": meta.get("publisher") or "",
+        "cover_url": meta.get("cover_url") or "",
+        "description": meta.get("description") or "",
+        "location": "",
+        "notes": "",
+        "favourite": False,
+        "source": f"seed-csv:{meta.get('source') or 'lookup'}",
+        "created_at": None,
+        "updated_at": None,
+    }
+
+    # Library / personal fields — CSV overrides are intentional.
+    for key in ("location", "notes", "genre"):
+        if row.get(key):
+            book[key] = row[key]
+
+    if "favourite" in row and row["favourite"] != "":
+        book["favourite"] = _parse_bool(row["favourite"])
+
+    if row.get("source"):
+        book["source"] = row["source"]
+
+    # Title (and other bib fields) stay from lookup. CSV title is ignored on purpose
+    # so a provisional label in the sheet gets rewritten by the catalog match.
+    if not book["title"] and row.get("title"):
+        book["title"] = row["title"]
+
+    return book
 
 
 async def _ensure_seed_table(conn: asyncpg.Connection) -> None:
@@ -183,27 +256,80 @@ async def _apply_sql(conn: asyncpg.Connection, path: Path) -> None:
     logger.info("Seed SQL %s: executed %s statement(s)", path.name, len(statements))
 
 
+async def _apply_csv(conn: asyncpg.Connection, path: Path) -> None:
+    """Lookup each ISBN online, then insert. CSV may override location/notes/etc."""
+    from app.services.isbn_lookup import lookup_isbn
+
+    rows = _csv_rows(path)
+    inserted = 0
+    skipped = 0
+    failed = 0
+
+    for row in rows:
+        isbn = _normalize_isbn(row.get("isbn") or "")
+        if not isbn or len(isbn) not in (10, 13):
+            logger.warning("Seed CSV %s: skipping invalid ISBN %r", path.name, row.get("isbn"))
+            failed += 1
+            continue
+
+        existing = await conn.fetchval("SELECT isbn FROM books WHERE isbn = $1", isbn)
+        if existing:
+            skipped += 1
+            continue
+
+        try:
+            meta = await lookup_isbn(isbn)
+        except ValueError as exc:
+            logger.warning("Seed CSV %s: lookup failed for %s (%s)", path.name, isbn, exc)
+            failed += 1
+            continue
+        except Exception:
+            logger.exception("Seed CSV %s: unexpected lookup error for %s", path.name, isbn)
+            failed += 1
+            continue
+
+        book = _override_from_csv(meta, {**row, "isbn": isbn})
+        if not book["title"]:
+            logger.warning("Seed CSV %s: no title after lookup for %s", path.name, isbn)
+            failed += 1
+            continue
+
+        count = await _insert_books(conn, [book])
+        inserted += count
+
+    logger.info(
+        "Seed CSV %s: %s row(s), %s inserted, %s already present, %s failed",
+        path.name,
+        len(rows),
+        inserted,
+        skipped,
+        failed,
+    )
+
+
 def _seed_files() -> list[Path]:
     if not SEED_DIR.exists():
         return []
-    files = [
+    return [
         path
         for path in sorted(SEED_DIR.iterdir())
         if path.is_file()
-        and path.suffix.lower() in {".json", ".sql"}
+        and path.suffix.lower() in SEED_SUFFIXES
+        and ".example." not in path.name
         and not path.name.endswith(".example.json")
         and not path.name.endswith(".example.sql")
-        and ".example." not in path.name
+        and not path.name.endswith(".example.csv")
     ]
-    return files
 
 
 async def apply_seeds(pool: asyncpg.Pool) -> None:
     """
     Apply new/changed files from SEED_DIR.
 
-    - *.json  → upsert book rows (ON CONFLICT DO NOTHING)
+    - *.json  → write book rows directly (ON CONFLICT DO NOTHING)
+    - *.csv   → online ISBN lookup per row, then insert (optional field overrides)
     - *.sql   → run SQL statements
+
     Tracked in schema_seeds by filename + checksum (re-apply if file changes).
     """
     files = _seed_files()
@@ -219,12 +345,18 @@ async def apply_seeds(pool: asyncpg.Pool) -> None:
                 logger.info("Seed %s already applied (unchanged)", path.name)
                 continue
             try:
-                async with conn.transaction():
-                    if path.suffix.lower() == ".json":
-                        await _apply_json(conn, path)
-                    else:
-                        await _apply_sql(conn, path)
+                suffix = path.suffix.lower()
+                if suffix == ".csv":
+                    # Lookups are slow; do not wrap the whole file in one DB transaction.
+                    await _apply_csv(conn, path)
                     await _mark_applied(conn, path.name, checksum)
+                else:
+                    async with conn.transaction():
+                        if suffix == ".json":
+                            await _apply_json(conn, path)
+                        else:
+                            await _apply_sql(conn, path)
+                        await _mark_applied(conn, path.name, checksum)
                 logger.info("Applied seed %s", path.name)
             except Exception:
                 logger.exception("Failed to apply seed %s", path.name)
