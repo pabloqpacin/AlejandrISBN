@@ -83,6 +83,12 @@ async def init_db() -> None:
             )
             await conn.execute(
                 """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS legal_deposit TEXT NOT NULL DEFAULT ''
+                """
+            )
+            await conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_books_title
                 ON books (lower(title))
                 """
@@ -109,6 +115,12 @@ async def init_db() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_books_favourite
                 ON books (favourite)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_books_legal_deposit
+                ON books (lower(legal_deposit))
                 """
             )
 

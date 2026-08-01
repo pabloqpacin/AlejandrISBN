@@ -67,7 +67,24 @@ def _normalize_isbn(value: str) -> str:
     return "".join(ch for ch in str(value) if ch.isalnum()).upper()
 
 
+_NA_VALUES = {"", "n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}
+
+
+def _optional_text(value: Any) -> str:
+    """Treat blank / n/a placeholders as empty string."""
+    text = str(value or "").strip()
+    if text.lower() in _NA_VALUES:
+        return ""
+    return text
+
+
+def _legal_deposit_from_row(row: dict[str, Any]) -> str:
+    return _optional_text(row.get("legal_deposit") or row.get("deposito_legal") or "")
+
+
 def _books_from_json(payload: Any) -> list[dict[str, Any]]:
+    from app.schemas import generate_local_id, is_local_id
+
     if isinstance(payload, dict):
         if isinstance(payload.get("books"), list):
             rows = payload["books"]
@@ -82,24 +99,36 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        isbn = _normalize_isbn(row.get("isbn") or "")
-        title = (row.get("title") or "").strip()
-        if not isbn or not title:
+        title = _optional_text(row.get("title"))
+        if not title:
             continue
+
+        raw_isbn = _optional_text(row.get("isbn"))
+        if not raw_isbn:
+            isbn = generate_local_id()
+        elif is_local_id(raw_isbn):
+            isbn = raw_isbn.upper()
+        else:
+            isbn = _normalize_isbn(raw_isbn)
+            if len(isbn) not in (10, 13):
+                logger.warning("JSON seed: skipping invalid ISBN %r for %r", row.get("isbn"), title)
+                continue
+
         cleaned.append(
             {
                 "isbn": isbn,
                 "title": title,
-                "authors": (row.get("authors") or "").strip(),
+                "authors": _optional_text(row.get("authors")),
                 "publication_year": row.get("publication_year"),
-                "genre": (row.get("genre") or "").strip(),
-                "publisher": (row.get("publisher") or "").strip(),
-                "cover_url": (row.get("cover_url") or "").strip(),
-                "description": (row.get("description") or "").strip(),
-                "location": (row.get("location") or "").strip(),
-                "notes": (row.get("notes") or "").strip(),
+                "genre": _optional_text(row.get("genre")),
+                "publisher": _optional_text(row.get("publisher")),
+                "cover_url": _optional_text(row.get("cover_url")),
+                "description": _optional_text(row.get("description")),
+                "location": _optional_text(row.get("location")),
+                "notes": _optional_text(row.get("notes")),
+                "legal_deposit": _legal_deposit_from_row(row),
                 "favourite": bool(row.get("favourite", False)),
-                "source": (row.get("source") or "seed").strip() or "seed",
+                "source": _optional_text(row.get("source")) or "seed",
                 "created_at": _parse_ts(row.get("created_at")),
                 "updated_at": _parse_ts(row.get("updated_at")),
             }
@@ -113,8 +142,8 @@ def _csv_rows(path: Path) -> list[dict[str, str]]:
     if not reader.fieldnames:
         raise ValueError(f"CSV seed {path.name} has no header row")
     fields = {name.strip().lower(): name for name in reader.fieldnames if name}
-    if "isbn" not in fields:
-        raise ValueError(f"CSV seed {path.name} must include an 'isbn' column")
+    if "isbn" not in fields and "title" not in fields:
+        raise ValueError(f"CSV seed {path.name} must include an 'isbn' and/or 'title' column")
 
     rows: list[dict[str, str]] = []
     for raw in reader:
@@ -122,7 +151,7 @@ def _csv_rows(path: Path) -> list[dict[str, str]]:
             key.strip().lower(): (raw.get(original) or "").strip()
             for key, original in fields.items()
         }
-        if not any(normalized.values()):
+        if not any(_optional_text(v) for v in normalized.values()):
             continue
         rows.append(normalized)
     return rows
@@ -133,7 +162,7 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
 
     Lookup always wins for bibliographic fields (title, authors, year, publisher,
     cover, description, source). CSV may still set library fields: location, notes,
-    genre, favourite.
+    genre, favourite, legal_deposit.
     """
     book = {
         "isbn": _normalize_isbn(row.get("isbn") or meta.get("isbn") or ""),
@@ -146,29 +175,68 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
         "description": meta.get("description") or "",
         "location": "",
         "notes": "",
+        "legal_deposit": "",
         "favourite": False,
         "source": f"seed-csv:{meta.get('source') or 'lookup'}",
         "created_at": None,
         "updated_at": None,
     }
 
-    # Library / personal fields — CSV overrides are intentional.
     for key in ("location", "notes", "genre"):
-        if row.get(key):
-            book[key] = row[key]
+        value = _optional_text(row.get(key))
+        if value:
+            book[key] = value
 
-    if "favourite" in row and row["favourite"] != "":
+    book["legal_deposit"] = _legal_deposit_from_row(row)
+
+    if "favourite" in row and _optional_text(row.get("favourite")) != "":
         book["favourite"] = _parse_bool(row["favourite"])
 
-    if row.get("source"):
-        book["source"] = row["source"]
+    if _optional_text(row.get("source")):
+        book["source"] = _optional_text(row["source"])
 
-    # Title (and other bib fields) stay from lookup. CSV title is ignored on purpose
-    # so a provisional label in the sheet gets rewritten by the catalog match.
-    if not book["title"] and row.get("title"):
-        book["title"] = row["title"]
+    if not book["title"] and _optional_text(row.get("title")):
+        book["title"] = _optional_text(row["title"])
 
     return book
+
+
+def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
+    """Row without usable ISBN: insert as LOCAL item (title required)."""
+    from app.schemas import generate_local_id
+
+    title = _optional_text(row.get("title"))
+    if not title:
+        return None
+
+    authors = _optional_text(row.get("authors") or row.get("autor") or "")
+    year_raw = _optional_text(row.get("publication_year") or row.get("year") or "")
+    year = None
+    if year_raw:
+        try:
+            year = int(year_raw)
+        except ValueError:
+            year = None
+
+    return {
+        "isbn": generate_local_id(),
+        "title": title,
+        "authors": authors,
+        "publication_year": year,
+        "genre": _optional_text(row.get("genre")),
+        "publisher": _optional_text(row.get("publisher")),
+        "cover_url": "",
+        "description": _optional_text(row.get("description")),
+        "location": _optional_text(row.get("location")),
+        "notes": _optional_text(row.get("notes")),
+        "legal_deposit": _legal_deposit_from_row(row),
+        "favourite": _parse_bool(row["favourite"])
+        if "favourite" in row and _optional_text(row.get("favourite")) != ""
+        else False,
+        "source": _optional_text(row.get("source")) or "seed-csv:manual",
+        "created_at": None,
+        "updated_at": None,
+    }
 
 
 async def _ensure_seed_table(conn: asyncpg.Connection) -> None:
@@ -212,12 +280,12 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             """
             INSERT INTO books (
                 isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, favourite, source, created_at, updated_at
+                cover_url, description, location, notes, legal_deposit, favourite, source, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11, $12,
-                COALESCE($13, NOW()),
-                COALESCE($14, NOW())
+                $7, $8, $9, $10, $11, $12, $13,
+                COALESCE($14, NOW()),
+                COALESCE($15, NOW())
             )
             ON CONFLICT (isbn) DO NOTHING
             """,
@@ -231,6 +299,7 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             book["description"],
             book["location"],
             book["notes"],
+            book.get("legal_deposit") or "",
             book["favourite"],
             book["source"],
             book["created_at"],
@@ -257,7 +326,7 @@ async def _apply_sql(conn: asyncpg.Connection, path: Path) -> None:
 
 
 async def _apply_csv(conn: asyncpg.Connection, path: Path) -> None:
-    """Lookup each ISBN online, then insert. CSV may override location/notes/etc."""
+    """ISBN rows → online lookup; rows without ISBN → manual insert (title + optional DL)."""
     from app.services.isbn_lookup import lookup_isbn
 
     rows = _csv_rows(path)
@@ -266,10 +335,27 @@ async def _apply_csv(conn: asyncpg.Connection, path: Path) -> None:
     failed = 0
 
     for row in rows:
-        isbn = _normalize_isbn(row.get("isbn") or "")
-        if not isbn or len(isbn) not in (10, 13):
+        raw_isbn = _optional_text(row.get("isbn"))
+        isbn = _normalize_isbn(raw_isbn) if raw_isbn else ""
+        has_isbn = bool(isbn) and len(isbn) in (10, 13)
+
+        if raw_isbn and not has_isbn:
             logger.warning("Seed CSV %s: skipping invalid ISBN %r", path.name, row.get("isbn"))
             failed += 1
+            continue
+
+        if not has_isbn:
+            book = _manual_book_from_csv(row)
+            if not book:
+                logger.warning(
+                    "Seed CSV %s: row without ISBN needs a title (got legal_deposit=%r)",
+                    path.name,
+                    row.get("legal_deposit") or row.get("deposito_legal"),
+                )
+                failed += 1
+                continue
+            count = await _insert_books(conn, [book])
+            inserted += count
             continue
 
         existing = await conn.fetchval("SELECT isbn FROM books WHERE isbn = $1", isbn)

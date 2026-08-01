@@ -19,7 +19,7 @@ Drop files into `seed/`:
 | File | Effect |
 |------|--------|
 | `something.json` | Writes book rows **directly** to the DB (`ON CONFLICT DO NOTHING`) |
-| `something.csv` | **Online ISBN lookup** for each row, then insert (optional overrides) |
+| `something.csv` | **Online ISBN lookup** when `isbn` is set; manual insert when `isbn` is `n/a` |
 | `something.sql` | Runs SQL statements |
 
 Ignored: `*.example.json`, `*.example.sql`, `*.example.csv`
@@ -27,48 +27,37 @@ Ignored: `*.example.json`, `*.example.sql`, `*.example.csv`
 On API startup, each file is applied if it is new or its contents changed (tracked in `schema_seeds`).
 
 ```bash
-# Full metadata already known → JSON
 cp seed/books.example.json seed/books.json
-
-# Only ISBNs (and maybe location/notes) → CSV looks up catalogs online
-cp seed/books.example.csv seed/books.csv
-
+# o: cp seed/books.example.csv seed/books.csv
 docker compose restart alejandrisbn
 ```
+
+### Shared optional fields
+
+`location`, `notes`, `genre`, `favourite`, `legal_deposit` (alias `deposito_legal`), `source`.
+
+Use `n/a` (or blank) when a field does not apply — stored as empty.
 
 ### JSON
 
 Shape: array of books, or `{ "books": [ ... ] }`.
 
-Required: `isbn`, `title`.  
-Optional: `authors`, `publication_year`, `genre`, `publisher`, `cover_url`, `description`, `location`, `notes`, `favourite`, `source`.
+- With ISBN: `isbn` + `title` (rest optional)
+- Without ISBN: omit `isbn` or set `"isbn": "n/a"` + `title` (+ usually `legal_deposit`)
 
-No network calls — values go straight into Postgres.
+No network calls — values go straight into Postgres. Missing ISBN → auto `LOCAL-…` id.
 
 ### CSV
 
-Header row required. Only `isbn` is required — the API looks up the rest online.
+Header row required. Each row needs a usable `isbn` **or** a `title`.
 
 ```csv
-isbn
-9780143127550
-9788490000000
+isbn,title,legal_deposit,location,favourite
+9780143127550,borrador,n/a,A1,false
+n/a,Persecución y asesinato de Jean-Paul Marat,B. 7528-1969,A1,true
 ```
 
-You may include a `title` column as a provisional label; **the online lookup always overwrites it** (same for authors, year, publisher, cover, description).
+- Real ISBN → online lookup; catalog overwrites title/authors/etc.; CSV keeps `location`, `notes`, `genre`, `favourite`, `legal_deposit`
+- `isbn` = `n/a` (or blank) → no lookup; insert with `title` + CSV fields (ideal for depósito legal)
 
-Optional columns that *do* stick after lookup: `location`, `notes`, `genre`, `favourite`, `source`.
-
-```csv
-isbn,title,location,notes
-9780143127550,borrador cualquiera,A1,Donación
-```
-
-For each row the API:
-
-1. Skips if the ISBN is already in the inventory
-2. Looks up metadata online (same catalogs as the UI)
-3. Applies library-field overrides from the CSV (`location`, `notes`, …)
-4. Inserts the book with the catalog title
-
-Rows that fail lookup are logged and skipped; the file is still marked applied. Edit the CSV (change contents) and restart to re-run.
+Rows that fail are logged and skipped; the file is still marked applied. Edit the CSV and restart to re-run.

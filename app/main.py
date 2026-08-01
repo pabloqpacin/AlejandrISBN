@@ -83,6 +83,7 @@ async def list_books(
                 OR publisher ILIKE ${idx}
                 OR location ILIKE ${idx}
                 OR notes ILIKE ${idx}
+                OR legal_deposit ILIKE ${idx}
             )"""
         )
 
@@ -152,6 +153,7 @@ async def export_books(
                 "description": item.get("description") or "",
                 "location": item.get("location") or "",
                 "notes": item.get("notes") or "",
+                "legal_deposit": item.get("legal_deposit") or "",
                 "favourite": bool(item.get("favourite")),
                 "source": item.get("source") or "",
                 "created_at": item.get("created_at"),
@@ -171,6 +173,7 @@ async def export_books(
             "publisher",
             "location",
             "notes",
+            "legal_deposit",
             "favourite",
             "cover_url",
             "description",
@@ -228,9 +231,9 @@ async def create_book(
             """
             INSERT INTO books (
                 isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, favourite, source
+                cover_url, description, location, notes, legal_deposit, favourite, source
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
             )
             RETURNING *
             """,
@@ -244,6 +247,7 @@ async def create_book(
             (payload.description or "").strip(),
             payload.location or "",
             payload.notes or "",
+            payload.legal_deposit or "",
             payload.favourite,
             "manual",
         )
@@ -258,7 +262,10 @@ async def create_book(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    overrides = payload.model_dump(exclude={"isbn", "location", "notes", "favourite"}, exclude_none=True)
+    overrides = payload.model_dump(
+        exclude={"isbn", "location", "notes", "legal_deposit", "favourite"},
+        exclude_none=True,
+    )
     for key, value in overrides.items():
         if isinstance(value, str):
             value = value.strip()
@@ -269,9 +276,9 @@ async def create_book(
         """
         INSERT INTO books (
             isbn, title, authors, publication_year, genre, publisher,
-            cover_url, description, location, notes, favourite, source
+            cover_url, description, location, notes, legal_deposit, favourite, source
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
         )
         RETURNING *
         """,
@@ -285,6 +292,7 @@ async def create_book(
         meta.get("description") or "",
         payload.location or "",
         payload.notes or "",
+        payload.legal_deposit or "",
         payload.favourite,
         meta.get("source") or "",
     )
@@ -301,6 +309,7 @@ ALLOWED_UPDATE_FIELDS = {
     "description",
     "location",
     "notes",
+    "legal_deposit",
     "favourite",
 }
 

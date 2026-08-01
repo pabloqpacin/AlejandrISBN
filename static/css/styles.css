@@ -691,6 +691,11 @@ html[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
   white-space: nowrap;
 }
 
+.col-dl {
+  white-space: nowrap;
+  min-width: 6.5rem;
+}
+
 .col-isbn code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.78rem;
@@ -703,6 +708,13 @@ html[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
   font-style: italic;
   color: var(--ink-soft);
   letter-spacing: 0.02em;
+}
+
+.legal-deposit {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--moss);
+  white-space: nowrap;
 }
 
 .col-actions {

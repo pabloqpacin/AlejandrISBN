@@ -27,6 +27,7 @@ const SORT_LABELS = {
   authors: "autor",
   publication_year: "año",
   isbn: "ISBN",
+  legal_deposit: "depósito legal",
   genre: "género",
   location: "ubicación",
   publisher: "editorial",
@@ -41,7 +42,7 @@ const GROUP_LABELS = {
   publisher: "editorial",
 };
 
-const COL_COUNT = 11;
+const COL_COUNT = 12;
 
 let books = [];
 let searchTimer = null;
@@ -90,9 +91,15 @@ function isLocalId(isbn) {
 
 function isbnCellHtml(book) {
   if (isLocalId(book.isbn)) {
-    return `<span class="no-isbn" title="${escapeHtml(book.isbn)}">sin ISBN</span>`;
+    return `<span class="no-isbn" title="${escapeHtml(book.isbn)}">—</span>`;
   }
   return `<code>${escapeHtml(book.isbn)}</code>`;
+}
+
+function legalDepositCellHtml(book) {
+  const value = String(book.legal_deposit || "").trim();
+  if (!value) return "—";
+  return `<span class="legal-deposit">${escapeHtml(value)}</span>`;
 }
 
 function compareValues(a, b) {
@@ -203,6 +210,7 @@ function bookRowHtml(book) {
     <td title="${escapeHtml(book.authors || "")}">${escapeHtml(truncate(book.authors || "—", 28))}</td>
     <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
     <td class="col-isbn">${isbnCellHtml(book)}</td>
+    <td class="col-dl">${legalDepositCellHtml(book)}</td>
     <td title="${escapeHtml(book.genre || "")}">${escapeHtml(truncate(book.genre, 28))}</td>
     <td class="col-location">${escapeHtml(book.location || "—")}</td>
     <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
@@ -585,8 +593,8 @@ function openManual() {
       <div class="detail-cover placeholder" aria-hidden="true">§</div>
       <div>
         <p class="review-kicker">Alta manual · sin ISBN</p>
-        <h3 class="review-title">Revista, manual o documento</h3>
-        <p class="authors">Rellena al menos el título. Se guardará un id interno automático.</p>
+        <h3 class="review-title">Libro, revista, manual o documento</h3>
+        <p class="authors">Ideal para ediciones con depósito legal u obras sin ISBN. Título obligatorio.</p>
 
         <form id="review-form" class="review-form">
           <label class="field">
@@ -594,8 +602,12 @@ function openManual() {
             <input name="title" type="text" required autofocus placeholder="Nombre del ítem" />
           </label>
           <label class="field">
-            <span>Autor(es) / editorial</span>
-            <input name="authors" type="text" placeholder="Opcional" />
+            <span>Autor(es)</span>
+            <input name="authors" type="text" placeholder="Apellido, Nombre…" />
+          </label>
+          <label class="field">
+            <span>Depósito legal</span>
+            <input name="legal_deposit" type="text" placeholder="B. 7528-1969" />
           </label>
           <div class="review-grid">
             <label class="field">
@@ -603,13 +615,13 @@ function openManual() {
               <input name="publication_year" type="number" min="1000" max="2100" />
             </label>
             <label class="field">
-              <span>Editorial / origen</span>
+              <span>Editorial</span>
               <input name="publisher" type="text" />
             </label>
           </div>
           <label class="field">
             <span>Género / tipo</span>
-            <input name="genre" type="text" placeholder="Revista, manual, documento…" />
+            <input name="genre" type="text" placeholder="Teatro, revista, manual…" />
           </label>
           <label class="field">
             <span>Ubicación</span>
@@ -617,7 +629,7 @@ function openManual() {
           </label>
           <label class="field">
             <span>Notas</span>
-            <input name="notes" type="text" placeholder="Volumen, fecha, préstamo…" />
+            <input name="notes" type="text" placeholder="Volumen, estado, préstamo…" />
           </label>
           <label class="field">
             <span>Descripción</span>
@@ -654,6 +666,7 @@ function openManual() {
     const payload = {
       title: String(data.get("title") || "").trim(),
       authors: String(data.get("authors") || "").trim(),
+      legal_deposit: String(data.get("legal_deposit") || "").trim(),
       genre: String(data.get("genre") || "").trim(),
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
@@ -722,6 +735,10 @@ function openDetail(book) {
             <div><dt>Fuente</dt><dd>${escapeHtml(book.source || "—")}</dd></div>
           </dl>
           <label class="field">
+            <span>Depósito legal</span>
+            <input name="legal_deposit" type="text" value="${escapeHtml(book.legal_deposit || "")}" placeholder="B. 7528-1969" />
+          </label>
+          <label class="field">
             <span>Género</span>
             <input name="genre" type="text" value="${escapeHtml(book.genre || "")}" />
           </label>
@@ -757,6 +774,7 @@ function openDetail(book) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const payload = {
+      legal_deposit: String(data.get("legal_deposit") || "").trim(),
       genre: String(data.get("genre") || "").trim(),
       location: String(data.get("location") || "").trim(),
       notes: String(data.get("notes") || "").trim(),

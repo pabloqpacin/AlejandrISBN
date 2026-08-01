@@ -43,12 +43,16 @@ class BookCreate(BaseModel):
     description: Optional[str] = None
     location: str = ""
     notes: str = ""
+    legal_deposit: str = ""
     favourite: bool = False
 
     @model_validator(mode="after")
     def validate_identity(self) -> "BookCreate":
         isbn = (self.isbn or "").strip()
         title = (self.title or "").strip()
+        self.legal_deposit = (self.legal_deposit or "").strip()
+        if self.legal_deposit.lower() in {"n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}:
+            self.legal_deposit = ""
 
         if not isbn:
             if not title:
@@ -80,6 +84,7 @@ class BookUpdate(BaseModel):
     description: Optional[str] = None
     location: Optional[str] = None
     notes: Optional[str] = None
+    legal_deposit: Optional[str] = None
     favourite: Optional[bool] = None
 
 
@@ -94,6 +99,7 @@ class BookOut(BaseModel):
     description: str = ""
     location: str = ""
     notes: str = ""
+    legal_deposit: str = ""
     favourite: bool = False
     source: str = ""
     created_at: str
