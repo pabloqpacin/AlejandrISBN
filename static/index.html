@@ -4,6 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AlejandrISBN — Inventario de biblioteca</title>
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem("alejandrisbn-theme");
+        const theme = saved === "dark" || saved === "light"
+          ? saved
+          : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,6 +25,11 @@
 </head>
 <body>
   <div class="atmosphere" aria-hidden="true"></div>
+
+  <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Cambiar tema" title="Cambiar tema">
+    <span class="icon-moon" aria-hidden="true">◐</span>
+    <span class="icon-sun" aria-hidden="true">◑</span>
+  </button>
 
   <header class="hero">
     <h1 class="brand">AlejandrISBN</h1>

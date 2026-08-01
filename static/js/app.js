@@ -950,4 +950,33 @@ detailClose.addEventListener("click", () => detailDialog.close());
 closeOnBackdrop(reviewDialog);
 closeOnBackdrop(detailDialog);
 
+const themeToggle = document.getElementById("theme-toggle");
+const THEME_KEY = "alejandrisbn-theme";
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    /* ignore */
+  }
+  if (themeToggle) {
+    themeToggle.setAttribute(
+      "aria-label",
+      next === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro",
+    );
+    themeToggle.title = next === "dark" ? "Modo claro" : "Modo oscuro";
+  }
+}
+
+themeToggle?.addEventListener("click", () => {
+  applyTheme(currentTheme() === "dark" ? "light" : "dark");
+});
+
+applyTheme(currentTheme());
 loadBooks();
