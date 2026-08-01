@@ -798,6 +798,116 @@ async def _isbnsearch_org(client: httpx.AsyncClient, isbn: str) -> Optional[dict
     return None
 
 
+def _parse_abebooks(html: str, plain: str) -> Optional[dict]:
+    """Parse AbeBooks / Iberlibro ISBN search results (same marketplace HTML)."""
+    if plain not in html.replace("-", "") and (to_isbn10(plain) or "") not in html:
+        return None
+
+    title = ""
+    m = re.search(r'data-test-id="listing-title"[^>]*>([^<]+)', html, flags=re.I)
+    if m:
+        title = m.group(1).strip()
+    if not title:
+        # "<isbn> - Title by Author – AbeBooks"
+        m = re.search(
+            r"<title>\s*\d[\d-]{8,16}\s*-\s*(.+?)\s+by\s+.+?[–-]\s*(?:AbeBooks|Iberlibro)",
+            html,
+            flags=re.I,
+        )
+        if m:
+            title = m.group(1).strip().rstrip(".")
+    if _is_bogus_title(title):
+        return None
+
+    authors = ""
+    m = re.search(
+        r'data-test-id="listing-author".{0,400}?<a[^>]*>([^<]+)',
+        html,
+        flags=re.I | re.S,
+    )
+    if m:
+        authors = m.group(1).strip()
+    if not authors:
+        m = re.search(
+            r"<title>\s*\d[\d-]{8,16}\s*-\s*.+?\s+by\s+(.+?)\s*[–-]\s*(?:AbeBooks|Iberlibro)",
+            html,
+            flags=re.I,
+        )
+        if m:
+            authors = m.group(1).strip()
+
+    publisher = ""
+    year: Optional[int] = None
+    m = re.search(
+        r'data-test-id="publisher-0"[^>]*>\s*Published by\s*([^<]+)',
+        html,
+        flags=re.I,
+    )
+    if m:
+        pub_line = m.group(1).strip()
+        # "Círculo de Lectores., 1987"
+        ym = re.search(r",\s*((?:19|20)\d{2})\s*$", pub_line)
+        if ym:
+            year = int(ym.group(1))
+            publisher = pub_line[: ym.start()].strip(" .,")
+        else:
+            publisher = pub_line.strip(" .,")
+
+    cover = ""
+    m = re.search(
+        r'src="(https://pictures\.abebooks\.com/isbn/[^"]+)"',
+        html,
+        flags=re.I,
+    )
+    if m:
+        cover = m.group(1)
+
+    return {
+        "title": title,
+        "authors": authors,
+        "publication_year": year,
+        "genre": "",
+        "publisher": publisher,
+        "cover_url": _https(cover),
+        "description": "",
+        "source": "abebooks",
+    }
+
+
+async def _abebooks(client: httpx.AsyncClient, isbn: str) -> Optional[dict]:
+    """Marketplace catalog — good for OOP / club editions missing from retail APIs."""
+    plain = (to_isbn13(isbn.replace("-", "")) or isbn.replace("-", "")).upper()
+    if not plain.isdigit():
+        plain = isbn.replace("-", "").upper()
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    }
+    urls = [
+        f"https://www.abebooks.com/servlet/SearchResults?isbn={plain}",
+        f"https://www.iberlibro.com/servlet/SearchResults?isbn={plain}",
+    ]
+    isbn10 = to_isbn10(plain)
+    if isbn10 and isbn10 != plain:
+        urls.append(f"https://www.abebooks.com/servlet/SearchResults?isbn={isbn10}")
+
+    for url in urls:
+        try:
+            resp = await client.get(url, headers=headers, follow_redirects=True)
+        except httpx.HTTPError:
+            continue
+        if resp.status_code != 200:
+            continue
+        parsed = _parse_abebooks(resp.text, plain)
+        if _usable_hit(parsed):
+            return parsed
+    return None
+
+
 def _merge(*parts: Optional[dict]) -> dict:
     merged = _empty_result()
     sources: list[str] = []
@@ -872,6 +982,7 @@ async def lookup_isbn(isbn: str) -> dict:
             *[_ibs_it(client, v) for v in plain_variants[:1]],
             *[_todos_tus_libros(client, v) for v in plain_variants[:1]],
             *[_isbnsearch_org(client, v) for v in plain_variants[:1]],
+            *[_abebooks(client, v) for v in plain_variants[:1]],
             return_exceptions=True,
         )
 
@@ -882,6 +993,7 @@ async def lookup_isbn(isbn: str) -> dict:
         # Last resort: sequential deeper search over all variants / catalogs
         async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers, follow_redirects=True) as client:
             fetchers = (
+                _abebooks,
                 _isbnsearch_org,
                 _ibs_it,
                 _todos_tus_libros,
