@@ -676,6 +676,84 @@ async def _ibs_it(client: httpx.AsyncClient, isbn: str) -> Optional[dict]:
     return None
 
 
+def _parse_isbnsearch(html: str) -> Optional[dict]:
+    """Parse isbnsearch.org book page."""
+    title = re.search(r"<h1[^>]*>\s*(.*?)\s*</h1>", html, flags=re.I | re.S)
+    if not title:
+        return None
+    # strip tags just in case
+    name = re.sub(r"<[^>]+>", "", title.group(1)).strip()
+    if not name:
+        return None
+
+    def labeled(label: str) -> str:
+        m = re.search(
+            rf"<strong>\s*{re.escape(label)}\s*:?\s*</strong>\s*([^<]+)",
+            html,
+            flags=re.I,
+        )
+        return m.group(1).strip() if m else ""
+
+    authors = labeled("Author") or labeled("Authors")
+    # Author may be wrapped in <a>
+    if not authors:
+        m = re.search(
+            r"<strong>\s*Author:?\s*</strong>\s*(?:<a[^>]*>)?([^<]+)",
+            html,
+            flags=re.I,
+        )
+        authors = m.group(1).strip() if m else ""
+
+    publisher = labeled("Publisher")
+    year = _year_from_text(labeled("Published") or labeled("Publication date"))
+    cover = ""
+    img = re.search(
+        r'<div class="image">\s*<img[^>]+src="([^"]+)"',
+        html,
+        flags=re.I,
+    )
+    if img:
+        cover = img.group(1)
+
+    return {
+        "title": name,
+        "authors": authors,
+        "publication_year": year,
+        "genre": "",
+        "publisher": publisher,
+        "cover_url": _https(cover),
+        "description": "",
+        "source": "isbnsearch",
+    }
+
+
+async def _isbnsearch_org(client: httpx.AsyncClient, isbn: str) -> Optional[dict]:
+    """Broad ISBN aggregator — fills gaps for editions missing from OL/TTL/Google/IBS."""
+    plain = isbn.replace("-", "")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
+    }
+    url = f"https://isbnsearch.org/isbn/{plain}"
+    try:
+        resp = await client.get(url, headers=headers, follow_redirects=True)
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    # Confirm page is about this ISBN (avoid soft-404 search pages)
+    if plain not in resp.text and (to_isbn10(plain) or "") not in resp.text:
+        return None
+    parsed = _parse_isbnsearch(resp.text)
+    if parsed and parsed.get("title"):
+        return parsed
+    return None
+
+
 def _merge(*parts: Optional[dict]) -> dict:
     merged = _empty_result()
     sources: list[str] = []
@@ -725,15 +803,20 @@ async def lookup_isbn(isbn: str) -> dict:
     plain_variants = list(dict.fromkeys(plain_variants))
     primary_isbn = plain_variants[0] if plain_variants else isbn.replace("-", "")
     italian = primary_isbn.startswith("97888") or primary_isbn.startswith("97912")
+    hungarian = primary_isbn.startswith("978963")
 
     async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers, follow_redirects=True) as client:
-        # Italian ISBNs: try IBS first. Spanish: TTL. Always race Open Library too.
+        # Italian: IBS first. Hungarian: isbnsearch. Spanish: TTL. Always race Open Library.
         lead = []
         if italian:
             lead.extend(_ibs_it(client, v) for v in plain_variants[:2])
+        elif hungarian:
+            lead.extend(_isbnsearch_org(client, v) for v in plain_variants[:2])
         else:
             lead.extend(_todos_tus_libros(client, v) for v in plain_variants[:2])
         lead.extend(_open_library_books_api(client, v) for v in plain_variants[:2])
+        if not hungarian:
+            lead.extend(_isbnsearch_org(client, v) for v in plain_variants[:1])
 
         primary = await _first_hit(lead)
 
@@ -743,6 +826,7 @@ async def lookup_isbn(isbn: str) -> dict:
             *[_open_library_books_api(client, v) for v in plain_variants[:2]],
             *[_ibs_it(client, v) for v in plain_variants[:1]],
             *[_todos_tus_libros(client, v) for v in plain_variants[:1]],
+            *[_isbnsearch_org(client, v) for v in plain_variants[:1]],
             return_exceptions=True,
         )
 
@@ -752,7 +836,13 @@ async def lookup_isbn(isbn: str) -> dict:
     if not merged.get("title"):
         # Last resort: sequential deeper search over all variants / catalogs
         async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers, follow_redirects=True) as client:
-            fetchers = (_ibs_it, _todos_tus_libros, _open_library_search, _google_books)
+            fetchers = (
+                _isbnsearch_org,
+                _ibs_it,
+                _todos_tus_libros,
+                _open_library_search,
+                _google_books,
+            )
             for variant in variants:
                 for fetcher in fetchers:
                     hit = await fetcher(client, variant)
