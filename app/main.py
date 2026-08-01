@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
+from csv import DictWriter
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Optional
 
@@ -90,8 +92,11 @@ async def list_books(
 
 
 @app.get("/api/export/books")
-async def export_books(db: asyncpg.Connection = Depends(get_db)) -> Response:
-    """Download full inventory as seed-compatible JSON."""
+async def export_books(
+    format: str = Query("json", pattern="^(json|csv)$"),
+    db: asyncpg.Connection = Depends(get_db),
+) -> Response:
+    """Download full inventory as JSON (seed) or CSV (Sheets/Excel)."""
     rows = await db.fetch("SELECT * FROM books ORDER BY title ASC")
     books = []
     for row in rows:
@@ -115,10 +120,37 @@ async def export_books(db: asyncpg.Connection = Depends(get_db)) -> Response:
         )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+    if format == "csv":
+        fieldnames = [
+            "isbn",
+            "title",
+            "authors",
+            "publication_year",
+            "genre",
+            "publisher",
+            "location",
+            "notes",
+            "cover_url",
+            "description",
+            "source",
+            "created_at",
+            "updated_at",
+        ]
+        buffer = StringIO()
+        writer = DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for book in books:
+            writer.writerow(book)
+        filename = f"alejandrisbn-books-{stamp}.csv"
+        return Response(
+            content=buffer.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     filename = f"alejandrisbn-books-{stamp}.json"
-    payload = {"books": books}
-    # JSONResponse + headers for download
-    response = JSONResponse(content=payload)
+    response = JSONResponse(content={"books": books})
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 

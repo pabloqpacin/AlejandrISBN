@@ -259,6 +259,51 @@ body {
   min-width: 240px;
 }
 
+.export-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.export-options {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  min-width: 7.5rem;
+  display: none;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(251, 252, 251, 0.98);
+  box-shadow: var(--shadow);
+  z-index: 5;
+}
+
+.export-menu:hover .export-options,
+.export-menu:focus-within .export-options {
+  display: flex;
+}
+
+.export-option {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.export-option:hover,
+.export-option:focus-visible {
+  background: rgba(47, 107, 79, 0.1);
+  color: var(--moss-deep);
+  outline: none;
+}
+
 .search {
   flex: 1;
   min-width: 220px;

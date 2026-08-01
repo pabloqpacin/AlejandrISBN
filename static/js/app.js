@@ -4,7 +4,7 @@ const lookupBtn = document.getElementById("lookup-btn");
 const formStatus = document.getElementById("form-status");
 const searchInput = document.getElementById("search-input");
 const clearSearchBtn = document.getElementById("clear-search");
-const exportBtn = document.getElementById("export-btn");
+const exportMenu = document.querySelector(".export-menu");
 const bookTbody = document.getElementById("book-tbody");
 const listMeta = document.getElementById("list-meta");
 const emptyState = document.getElementById("empty-state");
@@ -431,10 +431,13 @@ clearSearchBtn.addEventListener("click", () => {
   loadBooks();
 });
 
-exportBtn.addEventListener("click", async () => {
-  exportBtn.disabled = true;
+async function exportInventory(format) {
+  const optionButtons = exportMenu.querySelectorAll(".export-option");
+  optionButtons.forEach((btn) => {
+    btn.disabled = true;
+  });
   try {
-    const res = await fetch("/api/export/books");
+    const res = await fetch(`/api/export/books?format=${encodeURIComponent(format)}`);
     if (!res.ok) {
       setStatus("No se pudo exportar el inventario.", true);
       return;
@@ -442,7 +445,7 @@ exportBtn.addEventListener("click", async () => {
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";
     const match = disposition.match(/filename="?([^"]+)"?/);
-    const filename = match?.[1] || "alejandrisbn-books.json";
+    const filename = match?.[1] || `alejandrisbn-books.${format}`;
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -451,12 +454,21 @@ exportBtn.addEventListener("click", async () => {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    setStatus(`Exportado: ${filename}`);
+    setStatus(`Exportado (${format.toUpperCase()}): ${filename}`);
   } catch {
     setStatus("Error de red al exportar.", true);
   } finally {
-    exportBtn.disabled = false;
+    optionButtons.forEach((btn) => {
+      btn.disabled = false;
+    });
   }
+}
+
+exportMenu?.querySelectorAll("[data-export]").forEach((btn) => {
+  btn.addEventListener("click", (event) => {
+    event.preventDefault();
+    exportInventory(btn.getAttribute("data-export"));
+  });
 });
 
 function closeOnBackdrop(dialog) {

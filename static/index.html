@@ -51,7 +51,15 @@
           />
         </label>
         <button type="button" id="clear-search" class="btn ghost compact hidden">Limpiar</button>
-        <button type="button" id="export-btn" class="btn ghost compact">Exportar JSON</button>
+        <div class="export-menu">
+          <button type="button" class="btn ghost compact export-trigger" aria-haspopup="true" aria-expanded="false">
+            Exportar
+          </button>
+          <div class="export-options" role="menu">
+            <button type="button" class="export-option" data-export="json" role="menuitem">JSON</button>
+            <button type="button" class="export-option" data-export="csv" role="menuitem">CSV</button>
+          </div>
+        </div>
       </div>
     </div>
 
