@@ -225,7 +225,7 @@ body {
 }
 
 .inventory {
-  max-width: 920px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 1rem 1.5rem 4rem;
   animation: rise 1.05s ease 0.45s both;
@@ -234,10 +234,10 @@ body {
 .inventory-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: end;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
   border-top: 1px solid var(--line);
   padding-top: 2rem;
 }
@@ -249,6 +249,16 @@ body {
   font-weight: 500;
 }
 
+.inventory-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 240px;
+}
+
 .search {
   flex: 1;
   min-width: 220px;
@@ -256,43 +266,124 @@ body {
 }
 
 .list-meta {
-  margin: 0 0 1rem;
+  margin: 0.35rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
 
-.book-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(251, 252, 251, 0.72);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
 }
 
-.book-row {
-  display: grid;
-  grid-template-columns: 64px 1fr auto;
-  gap: 1rem;
-  align-items: center;
-  padding: 0.85rem 1rem;
-  border-radius: var(--radius);
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
+.inventory-table {
   width: 100%;
-  font: inherit;
-  color: inherit;
-  transition: background 0.2s, border-color 0.2s, transform 0.2s;
-  animation: rise 0.5s ease both;
+  border-collapse: collapse;
+  min-width: 980px;
+  font-size: 0.9rem;
 }
 
-.book-row:hover,
-.book-row:focus-visible {
-  background: rgba(251, 252, 251, 0.9);
-  border-color: var(--line);
-  outline: none;
+.inventory-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(232, 240, 234, 0.96);
+  border-bottom: 1px solid var(--line);
+  padding: 0.55rem 0.6rem;
+  text-align: left;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sort-btn {
+  border: none;
+  background: transparent;
+  padding: 0.15rem;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.sort-btn:hover,
+.sort-btn.active {
+  color: var(--moss-deep);
+}
+
+.inventory-table tbody td {
+  padding: 0.65rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  color: var(--ink-soft);
+}
+
+.inventory-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.inventory-table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.col-cover {
+  width: 48px;
+}
+
+.col-title {
+  min-width: 160px;
+  color: var(--ink) !important;
+}
+
+.col-year,
+.col-location {
+  white-space: nowrap;
+}
+
+.col-isbn {
+  white-space: nowrap;
+}
+
+.col-isbn code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--moss);
+  background: transparent;
+}
+
+.col-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.col-actions .btn {
+  margin-left: 0.15rem;
+}
+
+.linkish {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.linkish:hover {
+  color: var(--moss-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .cover {
@@ -304,6 +395,13 @@ body {
   box-shadow: var(--shadow);
 }
 
+.cover.thumb {
+  width: 38px;
+  height: 54px;
+  border-radius: 4px;
+  box-shadow: none;
+}
+
 .cover.placeholder {
   display: grid;
   place-items: center;
@@ -313,31 +411,12 @@ body {
   opacity: 0.7;
 }
 
-.meta h3 {
-  margin: 0 0 0.2rem;
-  font-family: var(--font-display);
-  font-size: 1.15rem;
-  font-weight: 500;
-  line-height: 1.25;
+.cover.thumb.placeholder {
+  font-size: 0.95rem;
 }
 
-.meta p {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.meta .isbn {
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-  margin-top: 0.35rem;
-  color: var(--moss);
-}
-
-.year-chip {
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-  white-space: nowrap;
+.detail-grid-2 {
+  grid-template-columns: 1fr 1fr;
 }
 
 .empty {

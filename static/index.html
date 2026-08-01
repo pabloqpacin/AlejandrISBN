@@ -37,19 +37,43 @@
 
   <main class="inventory">
     <div class="inventory-head">
-      <h2>Inventario</h2>
-      <label class="search">
-        <span class="visually-hidden">Buscar</span>
-        <input
-          id="search-input"
-          type="search"
-          placeholder="Buscar título, autor, ISBN, género, ubicación…"
-        />
-      </label>
+      <div>
+        <h2>Inventario</h2>
+        <p id="list-meta" class="list-meta"></p>
+      </div>
+      <div class="inventory-tools">
+        <label class="search">
+          <span class="visually-hidden">Buscar</span>
+          <input
+            id="search-input"
+            type="search"
+            placeholder="Buscar título, autor, ISBN, género, ubicación…"
+          />
+        </label>
+        <button type="button" id="clear-search" class="btn ghost compact hidden">Limpiar</button>
+      </div>
     </div>
 
-    <p id="list-meta" class="list-meta"></p>
-    <ul id="book-list" class="book-list"></ul>
+    <div class="table-wrap">
+      <table class="inventory-table" aria-label="Inventario de libros">
+        <thead>
+          <tr>
+            <th scope="col" class="col-cover" aria-hidden="true"></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort="title">Título</button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort="authors">Autor</button></th>
+            <th scope="col" class="col-year"><button type="button" class="sort-btn" data-sort="publication_year">Año</button></th>
+            <th scope="col" class="col-isbn"><button type="button" class="sort-btn" data-sort="isbn">ISBN</button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort="genre">Género</button></th>
+            <th scope="col" class="col-location"><button type="button" class="sort-btn" data-sort="location">Ubicación</button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort="publisher">Editorial</button></th>
+            <th scope="col"><button type="button" class="sort-btn" data-sort="notes">Notas</button></th>
+            <th scope="col" class="col-actions"><span class="visually-hidden">Acciones</span></th>
+          </tr>
+        </thead>
+        <tbody id="book-tbody"></tbody>
+      </table>
+    </div>
+
     <p id="empty-state" class="empty hidden">Aún no hay libros. Añade el primero con su ISBN.</p>
   </main>
 

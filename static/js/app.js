@@ -3,9 +3,11 @@ const lookupForm = document.getElementById("lookup-form");
 const lookupBtn = document.getElementById("lookup-btn");
 const formStatus = document.getElementById("form-status");
 const searchInput = document.getElementById("search-input");
-const bookList = document.getElementById("book-list");
+const clearSearchBtn = document.getElementById("clear-search");
+const bookTbody = document.getElementById("book-tbody");
 const listMeta = document.getElementById("list-meta");
 const emptyState = document.getElementById("empty-state");
+const sortButtons = document.querySelectorAll(".sort-btn");
 
 const reviewDialog = document.getElementById("review-dialog");
 const reviewBody = document.getElementById("review-body");
@@ -15,9 +17,22 @@ const detailDialog = document.getElementById("detail-dialog");
 const detailBody = document.getElementById("detail-body");
 const detailClose = document.getElementById("detail-close");
 
+const SORT_LABELS = {
+  title: "título",
+  authors: "autor",
+  publication_year: "año",
+  isbn: "ISBN",
+  genre: "género",
+  location: "ubicación",
+  publisher: "editorial",
+  notes: "notas",
+};
+
 let books = [];
 let searchTimer = null;
 let pendingIsbn = "";
+let sortKey = "title";
+let sortDir = "asc";
 
 function setStatus(message, isError = false) {
   formStatus.textContent = message;
@@ -39,40 +54,100 @@ function coverHtml(book, className = "cover") {
   return `<div class="${className} placeholder" aria-hidden="true">§</div>`;
 }
 
-function detailMessage(text, isError = false) {
+function detailMessage(text) {
   return Array.isArray(text)
     ? text.map((item) => item.msg || item).join(", ")
-    : text || (isError ? "Error" : "");
+    : text || "Error";
+}
+
+function truncate(text, max = 36) {
+  const value = String(text || "").trim();
+  if (!value) return "—";
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function compareValues(a, b) {
+  const emptyA = a === null || a === undefined || a === "";
+  const emptyB = b === null || b === undefined || b === "";
+  if (emptyA && emptyB) return 0;
+  if (emptyA) return 1;
+  if (emptyB) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), "es", { sensitivity: "base", numeric: true });
+}
+
+function sortedBooks() {
+  const copy = [...books];
+  copy.sort((left, right) => {
+    const result = compareValues(left[sortKey], right[sortKey]);
+    return sortDir === "asc" ? result : -result;
+  });
+  return copy;
+}
+
+function updateSortButtons() {
+  sortButtons.forEach((btn) => {
+    const active = btn.dataset.sort === sortKey;
+    const base = btn.textContent.replace(/[↑↓]\s*$/, "").trim();
+    btn.classList.toggle("active", active);
+    btn.textContent = active ? `${base} ${sortDir === "asc" ? "↑" : "↓"}` : base;
+  });
+}
+
+function findBook(isbn) {
+  return books.find((book) => book.isbn === isbn);
 }
 
 function renderList() {
-  bookList.innerHTML = "";
-  emptyState.classList.toggle("hidden", books.length > 0);
+  const rows = sortedBooks();
+  bookTbody.innerHTML = "";
+  emptyState.classList.toggle("hidden", rows.length > 0);
 
   const q = searchInput.value.trim();
-  listMeta.textContent = q
-    ? `${books.length} resultado${books.length === 1 ? "" : "s"} para “${q}”`
-    : `${books.length} libro${books.length === 1 ? "" : "s"} en inventario`;
+  clearSearchBtn.classList.toggle("hidden", !q);
 
-  books.forEach((book, index) => {
-    const li = document.createElement("li");
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "book-row";
-    btn.style.animationDelay = `${Math.min(index * 0.04, 0.4)}s`;
-    btn.innerHTML = `
-      ${coverHtml(book)}
-      <div class="meta">
-        <h3>${escapeHtml(book.title)}</h3>
-        <p>${escapeHtml(book.authors || "Autor desconocido")}</p>
-        <p class="isbn">${escapeHtml(book.isbn)}${book.location ? ` · ${escapeHtml(book.location)}` : ""}</p>
-      </div>
-      <span class="year-chip">${book.publication_year ?? ""}</span>
+  const sortHint = `orden: ${SORT_LABELS[sortKey]} ${sortDir === "asc" ? "A→Z" : "Z→A"}`;
+  listMeta.textContent = q
+    ? `${rows.length} resultado${rows.length === 1 ? "" : "s"} para “${q}” · ${sortHint}`
+    : `${rows.length} libro${rows.length === 1 ? "" : "s"} · ${sortHint}`;
+
+  updateSortButtons();
+
+  rows.forEach((book) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="col-cover">${coverHtml(book, "cover thumb")}</td>
+      <td class="col-title">
+        <button type="button" class="linkish" data-open="${escapeHtml(book.isbn)}">
+          ${escapeHtml(book.title)}
+        </button>
+      </td>
+      <td title="${escapeHtml(book.authors || "")}">${escapeHtml(truncate(book.authors || "—", 28))}</td>
+      <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
+      <td class="col-isbn"><code>${escapeHtml(book.isbn)}</code></td>
+      <td title="${escapeHtml(book.genre || "")}">${escapeHtml(truncate(book.genre, 28))}</td>
+      <td class="col-location">${escapeHtml(book.location || "—")}</td>
+      <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
+      <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
+      <td class="col-actions">
+        <button type="button" class="btn ghost compact" data-open="${escapeHtml(book.isbn)}">Ver</button>
+        <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.isbn)}" title="Eliminar">✕</button>
+      </td>
     `;
-    btn.addEventListener("click", () => openDetail(book));
-    li.appendChild(btn);
-    bookList.appendChild(li);
+    bookTbody.appendChild(tr);
   });
+}
+
+async function deleteBook(isbn, title) {
+  if (!confirm(`¿Eliminar “${title}” del inventario?`)) return false;
+  const res = await fetch(`/api/books/${encodeURIComponent(isbn)}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) {
+    setStatus("No se pudo eliminar el libro.", true);
+    return false;
+  }
+  setStatus("Libro eliminado.");
+  await loadBooks(searchInput.value.trim());
+  return true;
 }
 
 function openReview(isbn, meta) {
@@ -171,7 +246,7 @@ function openReview(isbn, meta) {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        reviewStatus.textContent = detailMessage(body.detail, true) || "No se pudo guardar.";
+        reviewStatus.textContent = detailMessage(body.detail) || "No se pudo guardar.";
         reviewStatus.classList.add("error");
         return;
       }
@@ -179,6 +254,8 @@ function openReview(isbn, meta) {
       isbnInput.value = "";
       setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
       searchInput.value = "";
+      sortKey = "title";
+      sortDir = "asc";
       await loadBooks();
     } catch {
       reviewStatus.textContent = "Error de red al guardar.";
@@ -200,7 +277,7 @@ function openDetail(book) {
         <h3>${escapeHtml(book.title)}</h3>
         <p class="authors">${escapeHtml(book.authors || "Autor desconocido")}</p>
         <form id="detail-form" class="review-form">
-          <dl class="detail-grid">
+          <dl class="detail-grid detail-grid-2">
             <div><dt>ISBN</dt><dd>${escapeHtml(book.isbn)}</dd></div>
             <div><dt>Año</dt><dd>${escapeHtml(book.publication_year ?? "—")}</dd></div>
             <div><dt>Editorial</dt><dd>${escapeHtml(book.publisher || "—")}</dd></div>
@@ -260,17 +337,9 @@ function openDetail(book) {
     renderList();
   });
 
-  detailBody.querySelector("[data-delete]")?.addEventListener("click", async (event) => {
-    const isbn = event.currentTarget.getAttribute("data-delete");
-    if (!isbn || !confirm(`¿Eliminar ${book.title} del inventario?`)) return;
-    const res = await fetch(`/api/books/${encodeURIComponent(isbn)}`, { method: "DELETE" });
-    if (!res.ok && res.status !== 204) {
-      setStatus("No se pudo eliminar el libro.", true);
-      return;
-    }
-    detailDialog.close();
-    await loadBooks(searchInput.value.trim());
-    setStatus("Libro eliminado.");
+  detailBody.querySelector("[data-delete]")?.addEventListener("click", async () => {
+    const ok = await deleteBook(book.isbn, book.title);
+    if (ok) detailDialog.close();
   });
 
   detailDialog.showModal();
@@ -287,6 +356,32 @@ async function loadBooks(q = "") {
   books = await res.json();
   renderList();
 }
+
+bookTbody.addEventListener("click", async (event) => {
+  const target = event.target.closest("[data-open], [data-delete]");
+  if (!target) return;
+  const isbn = target.getAttribute("data-open") || target.getAttribute("data-delete");
+  const book = findBook(isbn);
+  if (!book) return;
+  if (target.hasAttribute("data-delete")) {
+    await deleteBook(book.isbn, book.title);
+    return;
+  }
+  openDetail(book);
+});
+
+sortButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const key = btn.dataset.sort;
+    if (sortKey === key) {
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+    } else {
+      sortKey = key;
+      sortDir = "asc";
+    }
+    renderList();
+  });
+});
 
 lookupForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -308,7 +403,7 @@ lookupForm.addEventListener("submit", async (event) => {
     const res = await fetch(`/api/lookup/${encodeURIComponent(isbn)}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setStatus(detailMessage(data.detail, true) || "No se encontró ese ISBN.", true);
+      setStatus(detailMessage(data.detail) || "No se encontró ese ISBN.", true);
       return;
     }
 
@@ -323,9 +418,16 @@ lookupForm.addEventListener("submit", async (event) => {
 
 searchInput.addEventListener("input", () => {
   clearTimeout(searchTimer);
+  clearSearchBtn.classList.toggle("hidden", !searchInput.value.trim());
   searchTimer = setTimeout(() => {
     loadBooks(searchInput.value.trim());
   }, 250);
+});
+
+clearSearchBtn.addEventListener("click", () => {
+  searchInput.value = "";
+  clearSearchBtn.classList.add("hidden");
+  loadBooks();
 });
 
 function closeOnBackdrop(dialog) {
