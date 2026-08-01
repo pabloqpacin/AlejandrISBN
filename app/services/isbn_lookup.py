@@ -117,6 +117,40 @@ def _https(url: str) -> str:
     return url
 
 
+_BOGUS_TITLE_RE = re.compile(
+    r"(please\s+verify|verify\s+to\s+continue|just\s+a\s+moment|"
+    r"attention\s+required|access\s+denied|captcha|cloudflare|"
+    r"are\s+you\s+a\s+robot|enable\s+javascript|checking\s+your\s+browser|"
+    r"security\s+check|one\s+more\s+step)",
+    flags=re.I,
+)
+
+
+def _is_bogus_title(title: Any) -> bool:
+    """Reject CAPTCHA / bot-wall pages scraped as book titles."""
+    if not title or not str(title).strip():
+        return True
+    text = str(title).strip()
+    if _BOGUS_TITLE_RE.search(text):
+        return True
+    # Real book titles are rarely this short challenge phrase
+    if text.casefold() in {
+        "please verify",
+        "please verify to continue",
+        "verify to continue",
+        "access denied",
+        "forbidden",
+        "error",
+        "not found",
+    }:
+        return True
+    return False
+
+
+def _usable_hit(result: Optional[dict]) -> bool:
+    return bool(result and not _is_bogus_title(result.get("title")))
+
+
 def _author_names(value: Any) -> list[str]:
     if not value:
         return []
@@ -678,12 +712,16 @@ async def _ibs_it(client: httpx.AsyncClient, isbn: str) -> Optional[dict]:
 
 def _parse_isbnsearch(html: str) -> Optional[dict]:
     """Parse isbnsearch.org book page."""
+    # Bot walls often say "Please Verify to Continue" in <h1>
+    if _BOGUS_TITLE_RE.search(html) and "ISBN-13" not in html:
+        return None
+
     title = re.search(r"<h1[^>]*>\s*(.*?)\s*</h1>", html, flags=re.I | re.S)
     if not title:
         return None
     # strip tags just in case
     name = re.sub(r"<[^>]+>", "", title.group(1)).strip()
-    if not name:
+    if _is_bogus_title(name):
         return None
 
     def labeled(label: str) -> str:
@@ -705,6 +743,12 @@ def _parse_isbnsearch(html: str) -> Optional[dict]:
         authors = m.group(1).strip() if m else ""
 
     publisher = labeled("Publisher")
+    # Real book pages always expose ISBN-13 + at least author or publisher
+    if "ISBN-13" not in html:
+        return None
+    if not authors and not publisher:
+        return None
+
     year = _year_from_text(labeled("Published") or labeled("Publication date"))
     cover = ""
     img = re.search(
@@ -749,7 +793,7 @@ async def _isbnsearch_org(client: httpx.AsyncClient, isbn: str) -> Optional[dict
     if plain not in resp.text and (to_isbn10(plain) or "") not in resp.text:
         return None
     parsed = _parse_isbnsearch(resp.text)
-    if parsed and parsed.get("title"):
+    if _usable_hit(parsed):
         return parsed
     return None
 
@@ -758,13 +802,15 @@ def _merge(*parts: Optional[dict]) -> dict:
     merged = _empty_result()
     sources: list[str] = []
     for part in parts:
-        if not part:
+        if not part or _is_bogus_title(part.get("title")):
             continue
         src = part.get("source")
         if src:
             sources.append(str(src))
         for key, value in part.items():
             if key in {"source", "_detail_url"}:
+                continue
+            if key == "title" and _is_bogus_title(value):
                 continue
             current = merged.get(key)
             empty = current is None or current == ""
@@ -783,7 +829,7 @@ async def _first_hit(coros) -> Optional[dict]:
                 result = await task
             except Exception:
                 continue
-            if result and result.get("title"):
+            if _usable_hit(result):
                 for other in tasks:
                     other.cancel()
                 return result
@@ -815,8 +861,7 @@ async def lookup_isbn(isbn: str) -> dict:
         else:
             lead.extend(_todos_tus_libros(client, v) for v in plain_variants[:2])
         lead.extend(_open_library_books_api(client, v) for v in plain_variants[:2])
-        if not hungarian:
-            lead.extend(_isbnsearch_org(client, v) for v in plain_variants[:1])
+        # isbnsearch is flaky (bot walls) — only lead for Hungarian; else filler only
 
         primary = await _first_hit(lead)
 
@@ -846,13 +891,13 @@ async def lookup_isbn(isbn: str) -> dict:
             for variant in variants:
                 for fetcher in fetchers:
                     hit = await fetcher(client, variant)
-                    if hit and hit.get("title"):
+                    if _usable_hit(hit):
                         merged = _merge(merged, hit)
                         break
-                if merged.get("title"):
+                if not _is_bogus_title(merged.get("title")):
                     break
 
-    if not merged.get("title"):
+    if _is_bogus_title(merged.get("title")):
         tried = ", ".join(variants)
         raise ValueError(f"No bibliographic data found for ISBN {isbn} (tried: {tried})")
 
