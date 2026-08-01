@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AlejandrISBN">
+  <!-- soft night disc -->
+  <circle cx="32" cy="32" r="30" fill="#e8f0ea"/>
+  <!-- glow -->
+  <ellipse cx="32" cy="18" rx="14" ry="10" fill="#ffd27a" opacity="0.55"/>
+  <!-- flame -->
+  <path d="M32 6c4 5 8 8 8 13a8 8 0 1 1-16 0c0-5 4-8 8-13z" fill="#f08a3a"/>
+  <path d="M32 11c2.2 3 4.5 4.8 4.5 7.8a4.5 4.5 0 1 1-9 0c0-3 2.3-4.8 4.5-7.8z" fill="#ffd36b"/>
+  <path d="M32 15c1 1.4 2 2.2 2 3.6a2 2 0 1 1-4 0c0-1.4 1-2.2 2-3.6z" fill="#fff3c4"/>
+  <!-- lantern house -->
+  <rect x="24" y="26" width="16" height="10" rx="1.5" fill="#1f4a36"/>
+  <rect x="26" y="28" width="5" height="6" rx="0.5" fill="#ffe08a"/>
+  <rect x="33" y="28" width="5" height="6" rx="0.5" fill="#ffd27a"/>
+  <rect x="23" y="25" width="18" height="2.5" rx="1" fill="#1a2e24"/>
+  <!-- gallery -->
+  <rect x="21" y="36" width="22" height="2" rx="1" fill="#3d5348"/>
+  <!-- tower -->
+  <path d="M26 38h12l3 20H23z" fill="#2f6b4f"/>
+  <path d="M28 42h8l.6 4h-9.2z" fill="#7cb089" opacity="0.35"/>
+  <path d="M27.5 48h9l.6 4h-10.2z" fill="#7cb089" opacity="0.25"/>
+  <!-- door -->
+  <rect x="30" y="52" width="4" height="6" rx="1" fill="#1a2e24"/>
+  <!-- base rocks -->
+  <path d="M18 58h28c-2 3-8 4-14 4s-12-1-14-4z" fill="#3d5348"/>
+</svg>
