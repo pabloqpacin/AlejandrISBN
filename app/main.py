@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import asyncpg
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.database import close_pool, get_db, init_db, init_pool, record_to_dict
@@ -86,6 +87,40 @@ async def list_books(
             offset,
         )
     return [row_to_book(row) for row in rows]
+
+
+@app.get("/api/export/books")
+async def export_books(db: asyncpg.Connection = Depends(get_db)) -> Response:
+    """Download full inventory as seed-compatible JSON."""
+    rows = await db.fetch("SELECT * FROM books ORDER BY title ASC")
+    books = []
+    for row in rows:
+        item = record_to_dict(row)
+        books.append(
+            {
+                "isbn": item["isbn"],
+                "title": item["title"],
+                "authors": item.get("authors") or "",
+                "publication_year": item.get("publication_year"),
+                "genre": item.get("genre") or "",
+                "publisher": item.get("publisher") or "",
+                "cover_url": item.get("cover_url") or "",
+                "description": item.get("description") or "",
+                "location": item.get("location") or "",
+                "notes": item.get("notes") or "",
+                "source": item.get("source") or "",
+                "created_at": item.get("created_at"),
+                "updated_at": item.get("updated_at"),
+            }
+        )
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"alejandrisbn-books-{stamp}.json"
+    payload = {"books": books}
+    # JSONResponse + headers for download
+    response = JSONResponse(content=payload)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 @app.get("/api/books/{isbn}", response_model=BookOut)

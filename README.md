@@ -59,6 +59,7 @@ Docs: http://localhost:8000/docs
 | `POST` | `/api/books` | Añadir por ISBN → lookup online + guardar |
 | `PATCH` | `/api/books/{isbn}` | Actualizar campos |
 | `DELETE` | `/api/books/{isbn}` | Eliminar |
+| `GET` | `/api/export/books` | Descargar inventario completo (JSON, formato seed) |
 | `GET` | `/api/lookup/{isbn}` | Preview sin guardar |
 
 ### Ejemplo POST

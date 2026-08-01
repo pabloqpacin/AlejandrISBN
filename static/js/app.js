@@ -4,6 +4,7 @@ const lookupBtn = document.getElementById("lookup-btn");
 const formStatus = document.getElementById("form-status");
 const searchInput = document.getElementById("search-input");
 const clearSearchBtn = document.getElementById("clear-search");
+const exportBtn = document.getElementById("export-btn");
 const bookTbody = document.getElementById("book-tbody");
 const listMeta = document.getElementById("list-meta");
 const emptyState = document.getElementById("empty-state");
@@ -428,6 +429,34 @@ clearSearchBtn.addEventListener("click", () => {
   searchInput.value = "";
   clearSearchBtn.classList.add("hidden");
   loadBooks();
+});
+
+exportBtn.addEventListener("click", async () => {
+  exportBtn.disabled = true;
+  try {
+    const res = await fetch("/api/export/books");
+    if (!res.ok) {
+      setStatus("No se pudo exportar el inventario.", true);
+      return;
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match?.[1] || "alejandrisbn-books.json";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setStatus(`Exportado: ${filename}`);
+  } catch {
+    setStatus("Error de red al exportar.", true);
+  } finally {
+    exportBtn.disabled = false;
+  }
 });
 
 function closeOnBackdrop(dialog) {
