@@ -37,9 +37,22 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AlejandrISBN",
-    description="Inventario de biblioteca por ISBN",
+    description=(
+        "Inventario personal de biblioteca por ISBN.\n\n"
+        "- UI: `/`\n"
+        "- OpenAPI JSON (portable): `/openapi.json`\n"
+        "- Swagger UI: `/docs`\n"
+        "- ReDoc: `/redoc`"
+    ),
     version="1.0.0",
     lifespan=lifespan,
+    openapi_tags=[
+        {"name": "health", "description": "Estado del servicio y de la base de datos"},
+        {"name": "books", "description": "CRUD e inventario"},
+        {"name": "lookup", "description": "Metadatos online por ISBN (sin guardar)"},
+        {"name": "export", "description": "Descargas del inventario"},
+        {"name": "ui", "description": "Frontend estático"},
+    ],
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -59,18 +72,18 @@ def row_to_book(row: asyncpg.Record) -> BookOut:
     return BookOut(**record_to_dict(row))
 
 
-@app.get("/")
+@app.get("/", tags=["ui"], include_in_schema=False)
 async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
-@app.get("/api/health")
+@app.get("/api/health", tags=["health"])
 async def health(db: asyncpg.Connection = Depends(get_db)) -> dict:
     await db.fetchval("SELECT 1")
     return {"status": "ok", "app": "AlejandrISBN", "db": "postgres"}
 
 
-@app.get("/api/books", response_model=list[BookOut])
+@app.get("/api/books", response_model=list[BookOut], tags=["books"])
 async def list_books(
     q: Optional[str] = Query(None, description="Search title, author, ISBN, genre, publisher"),
     favourite: Optional[bool] = Query(None, description="Filter by favourite flag"),
@@ -116,7 +129,7 @@ async def list_books(
     return [row_to_book(row) for row in rows]
 
 
-@app.get("/api/suggestions")
+@app.get("/api/suggestions", tags=["books"])
 async def field_suggestions(
     db: asyncpg.Connection = Depends(get_db),
 ) -> dict:
@@ -141,7 +154,7 @@ async def field_suggestions(
     }
 
 
-@app.get("/api/export/books")
+@app.get("/api/export/books", tags=["export"])
 async def export_books(
     format: str = Query("json", pattern="^(json|csv)$"),
     db: asyncpg.Connection = Depends(get_db),
@@ -209,7 +222,7 @@ async def export_books(
     return response
 
 
-@app.get("/api/books/{isbn}", response_model=BookOut)
+@app.get("/api/books/{isbn}", response_model=BookOut, tags=["books"])
 async def get_book(
     isbn: str,
     db: asyncpg.Connection = Depends(get_db),
@@ -225,7 +238,7 @@ async def get_book(
     return row_to_book(row)
 
 
-@app.post("/api/books", response_model=BookOut, status_code=201)
+@app.post("/api/books", response_model=BookOut, status_code=201, tags=["books"])
 async def create_book(
     payload: BookCreate,
     db: asyncpg.Connection = Depends(get_db),
@@ -324,7 +337,7 @@ ALLOWED_UPDATE_FIELDS = {
 }
 
 
-@app.patch("/api/books/{isbn}", response_model=BookOut)
+@app.patch("/api/books/{isbn}", response_model=BookOut, tags=["books"])
 async def update_book(
     isbn: str,
     payload: BookUpdate,
@@ -367,7 +380,7 @@ async def update_book(
     return row_to_book(row)
 
 
-@app.delete("/api/books/{isbn}", status_code=204)
+@app.delete("/api/books/{isbn}", status_code=204, tags=["books"])
 async def delete_book(
     isbn: str,
     db: asyncpg.Connection = Depends(get_db),
@@ -382,7 +395,7 @@ async def delete_book(
         raise HTTPException(status_code=404, detail="Book not found")
 
 
-@app.get("/api/lookup/{isbn}")
+@app.get("/api/lookup/{isbn}", tags=["lookup"])
 async def preview_lookup(isbn: str) -> dict:
     """Preview online metadata without saving."""
     try:
