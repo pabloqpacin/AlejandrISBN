@@ -15,9 +15,9 @@
   <header class="hero">
     <p class="mark">TM</p>
     <h1 class="brand">AlejandrISBN</h1>
-    <p class="lede">Inventario lean de biblioteca. Guarda por ISBN; el catálogo se completa solo.</p>
+    <p class="lede">Inventario lean de biblioteca. Busca por ISBN, revisa los datos y guarda.</p>
 
-    <form id="add-form" class="add-form" autocomplete="off">
+    <form id="lookup-form" class="add-form lookup-only" autocomplete="off">
       <label class="field">
         <span>ISBN</span>
         <input
@@ -30,11 +30,7 @@
           maxlength="17"
         />
       </label>
-      <label class="field notes-field">
-        <span>Notas</span>
-        <input id="notes-input" name="notes" type="text" placeholder="Estantería B2, donación…" />
-      </label>
-      <button type="submit" class="btn primary" id="add-btn">Añadir al inventario</button>
+      <button type="submit" class="btn primary" id="lookup-btn">Buscar ISBN</button>
     </form>
     <p id="form-status" class="status" role="status" aria-live="polite"></p>
   </header>
@@ -47,7 +43,7 @@
         <input
           id="search-input"
           type="search"
-          placeholder="Buscar título, autor, ISBN, género…"
+          placeholder="Buscar título, autor, ISBN, género, ubicación…"
         />
       </label>
     </div>
@@ -57,11 +53,18 @@
     <p id="empty-state" class="empty hidden">Aún no hay libros. Añade el primero con su ISBN.</p>
   </main>
 
+  <dialog id="review-dialog" class="detail-dialog">
+    <div class="detail-sheet review-sheet">
+      <button type="button" class="detail-close" id="review-close" aria-label="Cerrar">×</button>
+      <div id="review-body"></div>
+    </div>
+  </dialog>
+
   <dialog id="detail-dialog" class="detail-dialog">
-    <form method="dialog" class="detail-sheet">
-      <button value="close" class="detail-close" aria-label="Cerrar">×</button>
+    <div class="detail-sheet">
+      <button type="button" class="detail-close" id="detail-close" aria-label="Cerrar">×</button>
       <div id="detail-body"></div>
-    </form>
+    </div>
   </dialog>
 
   <script src="/static/js/app.js" type="module"></script>

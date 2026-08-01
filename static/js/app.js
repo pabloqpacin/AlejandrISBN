@@ -1,17 +1,23 @@
 const isbnInput = document.getElementById("isbn-input");
-const notesInput = document.getElementById("notes-input");
-const addForm = document.getElementById("add-form");
-const addBtn = document.getElementById("add-btn");
+const lookupForm = document.getElementById("lookup-form");
+const lookupBtn = document.getElementById("lookup-btn");
 const formStatus = document.getElementById("form-status");
 const searchInput = document.getElementById("search-input");
 const bookList = document.getElementById("book-list");
 const listMeta = document.getElementById("list-meta");
 const emptyState = document.getElementById("empty-state");
+
+const reviewDialog = document.getElementById("review-dialog");
+const reviewBody = document.getElementById("review-body");
+const reviewClose = document.getElementById("review-close");
+
 const detailDialog = document.getElementById("detail-dialog");
 const detailBody = document.getElementById("detail-body");
+const detailClose = document.getElementById("detail-close");
 
 let books = [];
 let searchTimer = null;
+let pendingIsbn = "";
 
 function setStatus(message, isError = false) {
   formStatus.textContent = message;
@@ -28,9 +34,15 @@ function escapeHtml(value) {
 
 function coverHtml(book, className = "cover") {
   if (book.cover_url) {
-    return `<img class="${className}" src="${escapeHtml(book.cover_url)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'${className} placeholder',textContent:'§'}))" />`;
+    return `<img class="${className}" src="${escapeHtml(book.cover_url)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=\\'${className} placeholder\\' aria-hidden=\\'true\\'>§</div>'" />`;
   }
   return `<div class="${className} placeholder" aria-hidden="true">§</div>`;
+}
+
+function detailMessage(text, isError = false) {
+  return Array.isArray(text)
+    ? text.map((item) => item.msg || item).join(", ")
+    : text || (isError ? "Error" : "");
 }
 
 function renderList() {
@@ -53,7 +65,7 @@ function renderList() {
       <div class="meta">
         <h3>${escapeHtml(book.title)}</h3>
         <p>${escapeHtml(book.authors || "Autor desconocido")}</p>
-        <p class="isbn">${escapeHtml(book.isbn)}</p>
+        <p class="isbn">${escapeHtml(book.isbn)}${book.location ? ` · ${escapeHtml(book.location)}` : ""}</p>
       </div>
       <span class="year-chip">${book.publication_year ?? ""}</span>
     `;
@@ -63,6 +75,123 @@ function renderList() {
   });
 }
 
+function openReview(isbn, meta) {
+  pendingIsbn = isbn;
+  reviewBody.innerHTML = `
+    <div class="review-layout">
+      ${coverHtml(meta, "detail-cover")}
+      <div>
+        <p class="review-kicker">Match encontrado · ${escapeHtml(meta.source || "catálogo")}</p>
+        <h3 class="review-title">${escapeHtml(meta.title)}</h3>
+        <p class="authors">${escapeHtml(meta.authors || "Autor desconocido")}</p>
+        <p class="review-isbn">ISBN ${escapeHtml(isbn)}</p>
+
+        <form id="review-form" class="review-form">
+          <label class="field">
+            <span>Título</span>
+            <input name="title" type="text" value="${escapeHtml(meta.title || "")}" required />
+          </label>
+          <label class="field">
+            <span>Autor(es)</span>
+            <input name="authors" type="text" value="${escapeHtml(meta.authors || "")}" />
+          </label>
+          <div class="review-grid">
+            <label class="field">
+              <span>Año</span>
+              <input name="publication_year" type="number" min="1000" max="2100" value="${escapeHtml(meta.publication_year ?? "")}" />
+            </label>
+            <label class="field">
+              <span>Editorial</span>
+              <input name="publisher" type="text" value="${escapeHtml(meta.publisher || "")}" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Género</span>
+            <input name="genre" type="text" value="${escapeHtml(meta.genre || "")}" placeholder="Novela, ensayo, poesía…" />
+          </label>
+          <label class="field">
+            <span>Ubicación</span>
+            <input name="location" type="text" placeholder="A1, B2, Estantería norte…" autofocus />
+          </label>
+          <label class="field">
+            <span>Notas</span>
+            <input name="notes" type="text" placeholder="Donación, estado, préstamo…" />
+          </label>
+          <label class="field">
+            <span>Descripción</span>
+            <textarea name="description" rows="3">${escapeHtml(meta.description || "")}</textarea>
+          </label>
+          <input type="hidden" name="cover_url" value="${escapeHtml(meta.cover_url || "")}" />
+
+          <div class="detail-actions">
+            <button type="submit" class="btn primary" id="save-review-btn">Guardar en inventario</button>
+            <button type="button" class="btn ghost" id="cancel-review-btn">Cancelar</button>
+          </div>
+          <p id="review-status" class="status" role="status"></p>
+        </form>
+      </div>
+    </div>
+  `;
+
+  const form = reviewBody.querySelector("#review-form");
+  const saveBtn = reviewBody.querySelector("#save-review-btn");
+  const reviewStatus = reviewBody.querySelector("#review-status");
+
+  reviewBody.querySelector("#cancel-review-btn")?.addEventListener("click", () => {
+    reviewDialog.close();
+    setStatus("Alta cancelada.");
+  });
+
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const yearRaw = String(data.get("publication_year") || "").trim();
+    const payload = {
+      isbn: pendingIsbn,
+      title: String(data.get("title") || "").trim(),
+      authors: String(data.get("authors") || "").trim(),
+      genre: String(data.get("genre") || "").trim(),
+      publisher: String(data.get("publisher") || "").trim(),
+      location: String(data.get("location") || "").trim(),
+      notes: String(data.get("notes") || "").trim(),
+      description: String(data.get("description") || "").trim(),
+      cover_url: String(data.get("cover_url") || "").trim(),
+    };
+    if (yearRaw) payload.publication_year = Number(yearRaw);
+
+    saveBtn.disabled = true;
+    reviewStatus.textContent = "Guardando…";
+    reviewStatus.classList.remove("error");
+
+    try {
+      const res = await fetch("/api/books", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        reviewStatus.textContent = detailMessage(body.detail, true) || "No se pudo guardar.";
+        reviewStatus.classList.add("error");
+        return;
+      }
+      reviewDialog.close();
+      isbnInput.value = "";
+      setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
+      searchInput.value = "";
+      await loadBooks();
+    } catch {
+      reviewStatus.textContent = "Error de red al guardar.";
+      reviewStatus.classList.add("error");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  reviewDialog.showModal();
+  reviewBody.querySelector('input[name="location"]')?.focus();
+}
+
 function openDetail(book) {
   detailBody.innerHTML = `
     <div class="detail-layout">
@@ -70,25 +199,66 @@ function openDetail(book) {
       <div>
         <h3>${escapeHtml(book.title)}</h3>
         <p class="authors">${escapeHtml(book.authors || "Autor desconocido")}</p>
-        <dl class="detail-grid">
-          <div><dt>ISBN</dt><dd>${escapeHtml(book.isbn)}</dd></div>
-          <div><dt>Año</dt><dd>${escapeHtml(book.publication_year ?? "—")}</dd></div>
-          <div><dt>Género</dt><dd>${escapeHtml(book.genre || "—")}</dd></div>
-          <div><dt>Editorial</dt><dd>${escapeHtml(book.publisher || "—")}</dd></div>
-          <div><dt>Fuente</dt><dd>${escapeHtml(book.source || "—")}</dd></div>
-          <div><dt>Notas</dt><dd>${escapeHtml(book.notes || "—")}</dd></div>
-        </dl>
-        ${
-          book.description
-            ? `<p style="margin:1rem 0 0;font-size:0.92rem;color:var(--ink-soft)">${escapeHtml(book.description).slice(0, 420)}${book.description.length > 420 ? "…" : ""}</p>`
-            : ""
-        }
-        <div class="detail-actions">
-          <button type="button" class="btn danger" data-delete="${escapeHtml(book.isbn)}">Eliminar</button>
-        </div>
+        <form id="detail-form" class="review-form">
+          <dl class="detail-grid">
+            <div><dt>ISBN</dt><dd>${escapeHtml(book.isbn)}</dd></div>
+            <div><dt>Año</dt><dd>${escapeHtml(book.publication_year ?? "—")}</dd></div>
+            <div><dt>Editorial</dt><dd>${escapeHtml(book.publisher || "—")}</dd></div>
+            <div><dt>Fuente</dt><dd>${escapeHtml(book.source || "—")}</dd></div>
+          </dl>
+          <label class="field">
+            <span>Género</span>
+            <input name="genre" type="text" value="${escapeHtml(book.genre || "")}" />
+          </label>
+          <label class="field">
+            <span>Ubicación</span>
+            <input name="location" type="text" value="${escapeHtml(book.location || "")}" placeholder="A1, B2…" />
+          </label>
+          <label class="field">
+            <span>Notas</span>
+            <textarea name="notes" rows="2">${escapeHtml(book.notes || "")}</textarea>
+          </label>
+          ${
+            book.description
+              ? `<p class="detail-description">${escapeHtml(book.description).slice(0, 420)}${book.description.length > 420 ? "…" : ""}</p>`
+              : ""
+          }
+          <div class="detail-actions">
+            <button type="submit" class="btn primary compact">Guardar cambios</button>
+            <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.isbn)}">Eliminar</button>
+          </div>
+          <p id="detail-status" class="status" role="status"></p>
+        </form>
       </div>
     </div>
   `;
+
+  const detailStatus = detailBody.querySelector("#detail-status");
+  detailBody.querySelector("#detail-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const payload = {
+      genre: String(data.get("genre") || "").trim(),
+      location: String(data.get("location") || "").trim(),
+      notes: String(data.get("notes") || "").trim(),
+    };
+    const res = await fetch(`/api/books/${encodeURIComponent(book.isbn)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      detailStatus.textContent = "No se pudieron guardar los cambios.";
+      detailStatus.classList.add("error");
+      return;
+    }
+    const updated = await res.json();
+    const idx = books.findIndex((item) => item.isbn === book.isbn);
+    if (idx >= 0) books[idx] = updated;
+    detailStatus.textContent = "Cambios guardados.";
+    detailStatus.classList.remove("error");
+    renderList();
+  });
 
   detailBody.querySelector("[data-delete]")?.addEventListener("click", async (event) => {
     const isbn = event.currentTarget.getAttribute("data-delete");
@@ -107,7 +277,7 @@ function openDetail(book) {
 }
 
 async function loadBooks(q = "") {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ limit: "200" });
   if (q) params.set("q", q);
   const res = await fetch(`/api/books?${params}`);
   if (!res.ok) {
@@ -118,37 +288,36 @@ async function loadBooks(q = "") {
   renderList();
 }
 
-addForm.addEventListener("submit", async (event) => {
+lookupForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const isbn = isbnInput.value.trim();
-  const notes = notesInput.value.trim();
   if (!isbn) return;
 
-  addBtn.disabled = true;
+  lookupBtn.disabled = true;
   setStatus("Consultando catálogos online…");
 
   try {
-    const res = await fetch("/api/books", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isbn, notes }),
-    });
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      setStatus(data.detail || "No se pudo añadir el libro.", true);
+    const existing = await fetch(`/api/books/${encodeURIComponent(isbn)}`);
+    if (existing.ok) {
+      const book = await existing.json();
+      setStatus(`Ya está en inventario: ${book.title}`, true);
+      openDetail(book);
       return;
     }
 
-    isbnInput.value = "";
-    notesInput.value = "";
-    setStatus(`Añadido: ${data.title}`);
-    searchInput.value = "";
-    await loadBooks();
+    const res = await fetch(`/api/lookup/${encodeURIComponent(isbn)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setStatus(detailMessage(data.detail, true) || "No se encontró ese ISBN.", true);
+      return;
+    }
+
+    setStatus(`Match: ${data.title}. Revisa y completa antes de guardar.`);
+    openReview(isbn.replace(/[^0-9Xx]/g, "").toUpperCase(), data);
   } catch {
-    setStatus("Error de red al añadir el libro.", true);
+    setStatus("Error de red al buscar el ISBN.", true);
   } finally {
-    addBtn.disabled = false;
+    lookupBtn.disabled = false;
   }
 });
 
@@ -159,8 +328,15 @@ searchInput.addEventListener("input", () => {
   }, 250);
 });
 
-detailDialog.addEventListener("click", (event) => {
-  if (event.target === detailDialog) detailDialog.close();
-});
+function closeOnBackdrop(dialog) {
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+}
+
+reviewClose.addEventListener("click", () => reviewDialog.close());
+detailClose.addEventListener("click", () => detailDialog.close());
+closeOnBackdrop(reviewDialog);
+closeOnBackdrop(detailDialog);
 
 loadBooks();

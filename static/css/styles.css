@@ -118,6 +118,12 @@ body {
     grid-template-columns: 1.1fr 1fr auto;
     align-items: end;
   }
+
+  .add-form.lookup-only {
+    grid-template-columns: 1fr auto;
+    max-width: 28rem;
+    margin-inline: auto;
+  }
 }
 
 .field {
@@ -135,6 +141,7 @@ body {
 }
 
 .field input,
+.field textarea,
 .search input {
   width: 100%;
   border: 1px solid var(--line);
@@ -146,9 +153,11 @@ body {
   color: var(--ink);
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
+  resize: vertical;
 }
 
 .field input:focus,
+.field textarea:focus,
 .search input:focus {
   border-color: var(--moss);
   box-shadow: 0 0 0 3px rgba(47, 107, 79, 0.15);
@@ -341,10 +350,16 @@ body {
   display: none !important;
 }
 
+.btn.compact {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+  border-radius: 10px;
+}
+
 .detail-dialog {
   border: none;
   padding: 0;
-  max-width: min(560px, calc(100vw - 2rem));
+  max-width: min(640px, calc(100vw - 2rem));
   background: transparent;
 }
 
@@ -361,6 +376,12 @@ body {
   background: var(--paper);
   box-shadow: var(--shadow);
   border: 1px solid var(--line);
+  max-height: min(90vh, 900px);
+  overflow: auto;
+}
+
+.review-sheet {
+  max-width: min(720px, calc(100vw - 2rem));
 }
 
 .detail-close {
@@ -373,15 +394,18 @@ body {
   line-height: 1;
   color: var(--ink-soft);
   cursor: pointer;
+  z-index: 2;
 }
 
-.detail-layout {
+.detail-layout,
+.review-layout {
   display: grid;
   gap: 1.25rem;
 }
 
-@media (min-width: 480px) {
-  .detail-layout {
+@media (min-width: 520px) {
+  .detail-layout,
+  .review-layout {
     grid-template-columns: 120px 1fr;
   }
 }
@@ -395,22 +419,56 @@ body {
   justify-self: center;
 }
 
-.detail-layout h3 {
+.detail-layout h3,
+.review-title {
   margin: 0 0 0.35rem;
   font-family: var(--font-display);
   font-size: 1.45rem;
   font-weight: 500;
 }
 
-.detail-layout .authors {
+.review-kicker {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--moss);
+}
+
+.review-isbn {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--moss);
+  letter-spacing: 0.03em;
+}
+
+.detail-layout .authors,
+.review-layout .authors {
   margin: 0 0 1rem;
   color: var(--ink-soft);
+}
+
+.review-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.review-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+@media (min-width: 480px) {
+  .review-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .detail-grid {
   display: grid;
   gap: 0.65rem;
   font-size: 0.9rem;
+  margin: 0 0 0.75rem;
 }
 
 .detail-grid dt {
@@ -425,11 +483,17 @@ body {
   margin: 0.15rem 0 0;
 }
 
+.detail-description {
+  margin: 0.25rem 0 0;
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+}
+
 .detail-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-top: 1.25rem;
+  margin-top: 0.35rem;
 }
 
 @keyframes rise {

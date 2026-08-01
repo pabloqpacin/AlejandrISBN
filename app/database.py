@@ -84,11 +84,19 @@ async def init_db() -> None:
                     publisher        TEXT NOT NULL DEFAULT '',
                     cover_url        TEXT NOT NULL DEFAULT '',
                     description      TEXT NOT NULL DEFAULT '',
+                    location         TEXT NOT NULL DEFAULT '',
                     notes            TEXT NOT NULL DEFAULT '',
                     source           TEXT NOT NULL DEFAULT '',
                     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+            # Existing deployments created before `location`
+            await conn.execute(
+                """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT ''
                 """
             )
             await conn.execute(
@@ -107,6 +115,12 @@ async def init_db() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_books_isbn
                 ON books (isbn)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_books_location
+                ON books (lower(location))
                 """
             )
 
@@ -159,12 +173,12 @@ async def migrate_legacy_data() -> None:
                     """
                     INSERT INTO books (
                         isbn, title, authors, publication_year, genre, publisher,
-                        cover_url, description, notes, source, created_at, updated_at
+                        cover_url, description, location, notes, source, created_at, updated_at
                     ) VALUES (
                         $1, $2, $3, $4, $5, $6,
-                        $7, $8, $9, $10,
-                        COALESCE($11, NOW()),
-                        COALESCE($12, NOW())
+                        $7, $8, $9, $10, $11,
+                        COALESCE($12, NOW()),
+                        COALESCE($13, NOW())
                     )
                     ON CONFLICT (isbn) DO NOTHING
                     """,
@@ -176,6 +190,7 @@ async def migrate_legacy_data() -> None:
                     row.get("publisher") or "",
                     row.get("cover_url") or "",
                     row.get("description") or "",
+                    row.get("location") or "",
                     row.get("notes") or "",
                     row.get("source") or "",
                     created_at,

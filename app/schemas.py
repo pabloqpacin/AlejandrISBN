@@ -11,7 +11,17 @@ def normalize_isbn(value: str) -> str:
 
 
 class BookCreate(BaseModel):
+    """Create from ISBN lookup, with optional manual overrides from the review UI."""
+
     isbn: str = Field(..., min_length=10, max_length=17)
+    title: Optional[str] = None
+    authors: Optional[str] = None
+    publication_year: Optional[int] = None
+    genre: Optional[str] = None
+    publisher: Optional[str] = None
+    cover_url: Optional[str] = None
+    description: Optional[str] = None
+    location: str = ""
     notes: str = ""
 
     @field_validator("isbn")
@@ -28,6 +38,7 @@ class BookUpdate(BaseModel):
     publisher: Optional[str] = None
     cover_url: Optional[str] = None
     description: Optional[str] = None
+    location: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -40,6 +51,7 @@ class BookOut(BaseModel):
     publisher: str = ""
     cover_url: str = ""
     description: str = ""
+    location: str = ""
     notes: str = ""
     source: str = ""
     created_at: str

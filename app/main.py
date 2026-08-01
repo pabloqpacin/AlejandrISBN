@@ -66,6 +66,7 @@ async def list_books(
                OR authors ILIKE $1
                OR genre ILIKE $1
                OR publisher ILIKE $1
+               OR location ILIKE $1
                OR notes ILIKE $1
             ORDER BY title ASC
             LIMIT $2 OFFSET $3
@@ -117,13 +118,20 @@ async def create_book(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    overrides = payload.model_dump(exclude={"isbn", "location", "notes"}, exclude_none=True)
+    for key, value in overrides.items():
+        if isinstance(value, str):
+            value = value.strip()
+        if value not in (None, ""):
+            meta[key] = value
+
     row = await db.fetchrow(
         """
         INSERT INTO books (
             isbn, title, authors, publication_year, genre, publisher,
-            cover_url, description, notes, source
+            cover_url, description, location, notes, source
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
         )
         RETURNING *
         """,
@@ -135,6 +143,7 @@ async def create_book(
         meta.get("publisher") or "",
         meta.get("cover_url") or "",
         meta.get("description") or "",
+        payload.location or "",
         payload.notes or "",
         meta.get("source") or "",
     )
@@ -149,6 +158,7 @@ ALLOWED_UPDATE_FIELDS = {
     "publisher",
     "cover_url",
     "description",
+    "location",
     "notes",
 }
 
