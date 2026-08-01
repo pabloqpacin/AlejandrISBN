@@ -49,9 +49,53 @@ let searchTimer = null;
 let pendingIsbn = "";
 let sortKey = "title";
 let sortDir = "asc";
-let groupBy = null;
+const VIEW_STATE_KEY = "alejandrisbn-view";
+
+/** @type {string[]} ordered group-by fields — all active at once (nested) */
+let groupByFields = [];
+/** @type {{ field: string, key: string, label: string }[]} facet filters — AND */
+let facetFilters = [];
 let suggestions = { authors: [], genre: [], location: [] };
 let suggestionsLoadedAt = 0;
+
+function loadViewState() {
+  try {
+    const raw = sessionStorage.getItem(VIEW_STATE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (Array.isArray(saved.groupByFields)) {
+      groupByFields = saved.groupByFields.filter((field) => GROUP_LABELS[field]);
+    }
+    if (Array.isArray(saved.facetFilters)) {
+      facetFilters = saved.facetFilters.filter(
+        (facet) =>
+          facet &&
+          GROUP_LABELS[facet.field] &&
+          typeof facet.key === "string" &&
+          typeof facet.label === "string",
+      );
+    }
+    if (saved.sortKey && SORT_LABELS[saved.sortKey]) {
+      sortKey = saved.sortKey;
+    }
+    if (saved.sortDir === "asc" || saved.sortDir === "desc") {
+      sortDir = saved.sortDir;
+    }
+  } catch {
+    /* ignore corrupt state */
+  }
+}
+
+function saveViewState() {
+  try {
+    sessionStorage.setItem(
+      VIEW_STATE_KEY,
+      JSON.stringify({ groupByFields, facetFilters, sortKey, sortDir }),
+    );
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 function setStatus(message, isError = false) {
   formStatus.textContent = message;
@@ -122,8 +166,14 @@ function sortedBooks(list = books) {
   return copy;
 }
 
-function visibleBooks() {
-  return sortedBooks();
+function groupKey(value, field) {
+  if (field === "favourite") {
+    return value ? "1" : "0";
+  }
+  if (field === "publication_year") {
+    return value == null || value === "" ? "" : String(value);
+  }
+  return String(value ?? "").trim();
 }
 
 function groupLabel(value, field) {
@@ -137,8 +187,53 @@ function groupLabel(value, field) {
   return text || "Sin clasificar";
 }
 
-function setGroupBy(field) {
-  groupBy = groupBy === field ? null : field;
+function bookMatchesFacets(book) {
+  return facetFilters.every((facet) => groupKey(book[facet.field], facet.field) === facet.key);
+}
+
+function visibleBooks() {
+  return sortedBooks(books.filter(bookMatchesFacets));
+}
+
+function toggleGroupBy(field) {
+  if (!GROUP_LABELS[field]) return;
+  const idx = groupByFields.indexOf(field);
+  if (idx >= 0) {
+    groupByFields = groupByFields.filter((item) => item !== field);
+  } else {
+    groupByFields = [...groupByFields, field];
+  }
+  saveViewState();
+  renderList();
+}
+
+function toggleFacetFilter(field, key, label) {
+  const existing = facetFilters.findIndex((facet) => facet.field === field && facet.key === key);
+  if (existing >= 0) {
+    facetFilters = facetFilters.filter((_, index) => index !== existing);
+  } else {
+    // One value per field; replace if same dimension already filtered
+    facetFilters = [...facetFilters.filter((facet) => facet.field !== field), { field, key, label }];
+  }
+  saveViewState();
+  renderList();
+}
+
+function clearGroupBy(field = null) {
+  groupByFields = field ? groupByFields.filter((item) => item !== field) : [];
+  saveViewState();
+  renderList();
+}
+
+function clearFacetFilter(field = null, key = null) {
+  if (!field) {
+    facetFilters = [];
+  } else if (key == null) {
+    facetFilters = facetFilters.filter((facet) => facet.field !== field);
+  } else {
+    facetFilters = facetFilters.filter((facet) => !(facet.field === field && facet.key === key));
+  }
+  saveViewState();
   renderList();
 }
 
@@ -159,7 +254,7 @@ function updateSortButtons() {
 
 function updateGroupToggles() {
   groupToggles.forEach((btn) => {
-    const active = btn.dataset.group === groupBy;
+    const active = groupByFields.includes(btn.dataset.group);
     btn.classList.toggle("is-on", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
     const th = btn.closest("th");
@@ -169,19 +264,53 @@ function updateGroupToggles() {
 
 function updateViewChips() {
   if (!viewChips) return;
-  if (!groupBy) {
+  const hasGroups = groupByFields.length > 0;
+  const hasFacets = facetFilters.length > 0;
+  if (!hasGroups && !hasFacets) {
     viewChips.hidden = true;
     viewChips.innerHTML = "";
     return;
   }
-  const label = GROUP_LABELS[groupBy] || groupBy;
+
+  const groupChips = groupByFields
+    .map((field, index) => {
+      const label = GROUP_LABELS[field] || field;
+      const order = groupByFields.length > 1 ? ` <span class="chip-ord">${index + 1}</span>` : "";
+      return `
+        <span class="view-chip view-chip-group">
+          Agrupar${order} <strong>${escapeHtml(label)}</strong>
+          <button type="button" class="chip-clear" data-clear-group="${escapeHtml(field)}" aria-label="Quitar agrupación por ${escapeHtml(label)}">×</button>
+        </span>
+      `;
+    })
+    .join("");
+
+  const facetChips = facetFilters
+    .map(
+      (facet) => `
+        <span class="view-chip view-chip-filter">
+          <span class="chip-dim">${escapeHtml(GROUP_LABELS[facet.field] || facet.field)}</span>
+          <strong>${escapeHtml(facet.label)}</strong>
+          <button
+            type="button"
+            class="chip-clear"
+            data-clear-facet
+            data-field="${escapeHtml(facet.field)}"
+            data-key="${escapeHtml(facet.key)}"
+            aria-label="Quitar filtro ${escapeHtml(facet.label)}"
+          >×</button>
+        </span>
+      `,
+    )
+    .join("");
+
+  const clearAll =
+    hasGroups || hasFacets
+      ? `<button type="button" class="view-chip view-chip-clear-all" data-clear-view>Limpiar vista</button>`
+      : "";
+
   viewChips.hidden = false;
-  viewChips.innerHTML = `
-    <span class="view-chip">
-      Agrupado por <strong>${escapeHtml(label)}</strong>
-      <button type="button" class="chip-clear" data-clear-group aria-label="Quitar agrupación">×</button>
-    </span>
-  `;
+  viewChips.innerHTML = `${groupChips}${facetChips}${clearAll}`;
 }
 
 function findBook(isbn) {
@@ -222,13 +351,24 @@ function bookRowHtml(book) {
   `;
 }
 
-function appendGroupHeader(label, count) {
+function appendGroupHeader({ field, key, label, count, depth, filtered }) {
   const tr = document.createElement("tr");
-  tr.className = "group-row";
+  tr.className = `group-row depth-${Math.min(depth, 4)}${filtered ? " is-filtered" : ""}`;
   tr.innerHTML = `
     <td colspan="${COL_COUNT}">
-      <span class="group-label">${escapeHtml(label)}</span>
-      <span class="group-count">${count}</span>
+      <button
+        type="button"
+        class="group-filter-btn"
+        data-facet-field="${escapeHtml(field)}"
+        data-facet-key="${escapeHtml(key)}"
+        data-facet-label="${escapeHtml(label)}"
+        aria-pressed="${filtered ? "true" : "false"}"
+        title="${filtered ? "Quitar filtro" : "Filtrar por este grupo (se combina con los demás)"}"
+      >
+        <span class="group-label">${escapeHtml(label)}</span>
+        <span class="group-count">${count}</span>
+        <span class="group-filter-hint">${filtered ? "filtro activo" : "filtrar"}</span>
+      </button>
     </td>
   `;
   bookTbody.appendChild(tr);
@@ -240,25 +380,52 @@ function appendBookRow(book) {
   bookTbody.appendChild(tr);
 }
 
-function renderGrouped(rows, field) {
+function partitionByField(rows, field) {
   const groups = new Map();
   rows.forEach((book) => {
-    const key = groupLabel(book[field], field);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(book);
+    const key = groupKey(book[field], field);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label: groupLabel(book[field], field),
+        items: [],
+      });
+    }
+    groups.get(key).items.push(book);
   });
 
-  let keys = [...groups.keys()];
+  let entries = [...groups.values()];
   if (field === "favourite") {
-    keys = ["Favoritos", "Otros"].filter((key) => groups.has(key));
+    const order = ["1", "0"];
+    entries.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
   } else {
-    keys.sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base", numeric: true }));
+    entries.sort((a, b) =>
+      a.label.localeCompare(b.label, "es", { sensitivity: "base", numeric: true }),
+    );
+  }
+  return entries;
+}
+
+function renderGrouped(rows, fields, depth = 0) {
+  if (!fields.length) {
+    rows.forEach(appendBookRow);
+    return;
   }
 
-  keys.forEach((key) => {
-    const items = groups.get(key);
-    appendGroupHeader(key, items.length);
-    items.forEach(appendBookRow);
+  const [field, ...rest] = fields;
+  partitionByField(rows, field).forEach((group) => {
+    const filtered = facetFilters.some(
+      (facet) => facet.field === field && facet.key === group.key,
+    );
+    appendGroupHeader({
+      field,
+      key: group.key,
+      label: group.label,
+      count: group.items.length,
+      depth,
+      filtered,
+    });
+    renderGrouped(group.items, rest, depth + 1);
   });
 }
 
@@ -271,16 +438,23 @@ function renderList() {
   clearSearchBtn.classList.toggle("hidden", !q);
 
   const sortHint = `orden: ${SORT_LABELS[sortKey]} ${sortDir === "asc" ? "A→Z" : "Z→A"}`;
+  const filterHint = facetFilters.length
+    ? ` · ${facetFilters.length} filtro${facetFilters.length === 1 ? "" : "s"}`
+    : "";
+  const groupHint = groupByFields.length
+    ? ` · agrupado: ${groupByFields.map((field) => GROUP_LABELS[field] || field).join(" → ")}`
+    : "";
   listMeta.textContent = q
-    ? `${rows.length} resultado${rows.length === 1 ? "" : "s"} para “${q}” · ${sortHint}`
-    : `${rows.length} libro${rows.length === 1 ? "" : "s"} · ${sortHint}`;
+    ? `${rows.length} resultado${rows.length === 1 ? "" : "s"} para “${q}” · ${sortHint}${filterHint}${groupHint}`
+    : `${rows.length} libro${rows.length === 1 ? "" : "s"} · ${sortHint}${filterHint}${groupHint}`;
 
   updateSortButtons();
   updateGroupToggles();
   updateViewChips();
 
-  if (groupBy && GROUP_LABELS[groupBy]) {
-    renderGrouped(rows, groupBy);
+  const activeGroups = groupByFields.filter((field) => GROUP_LABELS[field]);
+  if (activeGroups.length) {
+    renderGrouped(rows, activeGroups);
     return;
   }
 
@@ -821,6 +995,16 @@ async function loadBooks(q = "") {
 }
 
 bookTbody.addEventListener("click", async (event) => {
+  const facetBtn = event.target.closest("[data-facet-field]");
+  if (facetBtn) {
+    toggleFacetFilter(
+      facetBtn.getAttribute("data-facet-field"),
+      facetBtn.getAttribute("data-facet-key"),
+      facetBtn.getAttribute("data-facet-label"),
+    );
+    return;
+  }
+
   const favBtn = event.target.closest("[data-fav-toggle]");
   if (favBtn) {
     await toggleFavourite(favBtn.getAttribute("data-fav-toggle"));
@@ -848,20 +1032,36 @@ sortButtons.forEach((btn) => {
       sortKey = key;
       sortDir = key === "favourite" ? "desc" : "asc";
     }
+    saveViewState();
     renderList();
   });
 });
 
 groupToggles.forEach((btn) => {
   btn.addEventListener("click", () => {
-    setGroupBy(btn.dataset.group);
+    toggleGroupBy(btn.dataset.group);
   });
 });
 
 viewChips?.addEventListener("click", (event) => {
-  if (event.target.closest("[data-clear-group]")) {
-    groupBy = null;
+  if (event.target.closest("[data-clear-view]")) {
+    groupByFields = [];
+    facetFilters = [];
+    saveViewState();
     renderList();
+    return;
+  }
+  const clearGroup = event.target.closest("[data-clear-group]");
+  if (clearGroup) {
+    clearGroupBy(clearGroup.getAttribute("data-clear-group"));
+    return;
+  }
+  const clearFacet = event.target.closest("[data-clear-facet]");
+  if (clearFacet) {
+    clearFacetFilter(
+      clearFacet.getAttribute("data-field"),
+      clearFacet.getAttribute("data-key"),
+    );
   }
 });
 
@@ -997,4 +1197,5 @@ themeToggle?.addEventListener("click", () => {
 });
 
 applyTheme(currentTheme());
+loadViewState();
 loadBooks();

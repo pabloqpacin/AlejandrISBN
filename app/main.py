@@ -45,6 +45,16 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.middleware("http")
+async def disable_static_cache(request, call_next):
+    """Avoid stale UI after rebuilds (browser F5 was keeping old app.js)."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 def row_to_book(row: asyncpg.Record) -> BookOut:
     return BookOut(**record_to_dict(row))
 
