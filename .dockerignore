@@ -4,8 +4,8 @@ __pycache__
 .git
 .gitignore
 *.md
-data/*.db
 .env
 .DS_Store
 .pytest_cache
 .mypy_cache
+data

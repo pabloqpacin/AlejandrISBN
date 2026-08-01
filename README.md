@@ -24,8 +24,6 @@ docker compose down          # para contenedores, conserva el volumen
 docker compose down -v       # ¡borra también Postgres!
 ```
 
-Si existía un inventario SQLite en `data/`, se importa automáticamente la primera vez que Postgres esté vacío.
-
 ## Arranque (local)
 
 Necesitas Postgres accesible y `DATABASE_URL`:
@@ -61,4 +59,4 @@ curl -X POST http://localhost:8000/api/books \
 
 ## Columnas
 
-`isbn`, `title`, `authors`, `publication_year`, `genre`, `publisher`, `cover_url`, `description`, `notes`, `source`, `created_at`, `updated_at`
+`isbn`, `title`, `authors`, `publication_year`, `genre`, `publisher`, `cover_url`, `description`, `location`, `notes`, `source`, `created_at`, `updated_at`

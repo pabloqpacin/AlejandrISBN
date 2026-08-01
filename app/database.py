@@ -1,35 +1,12 @@
-import json
 import os
-from datetime import datetime
-from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 import asyncpg
-
-
-def _parse_ts(value: Any) -> Optional[datetime]:
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        return value
-    text = str(value).strip().replace("Z", "+00:00")
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(text, fmt)
-            except ValueError:
-                continue
-    return None
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://alejandrisbn:alejandrisbn@localhost:5432/alejandrisbn",
 )
-
-SQLITE_PATH = Path(__file__).resolve().parent.parent / "data" / "alejandrisbn.db"
-SEED_PATH = Path(__file__).resolve().parent.parent / "data" / "books_seed.json"
 
 pool: Optional[asyncpg.Pool] = None
 
@@ -92,7 +69,6 @@ async def init_db() -> None:
                 )
                 """
             )
-            # Existing deployments created before `location`
             await conn.execute(
                 """
                 ALTER TABLE books
@@ -123,76 +99,3 @@ async def init_db() -> None:
                 ON books (lower(location))
                 """
             )
-
-    await migrate_legacy_data()
-
-
-def _load_legacy_rows() -> list[dict[str, Any]]:
-    if SEED_PATH.exists():
-        return json.loads(SEED_PATH.read_text(encoding="utf-8"))
-
-    if not SQLITE_PATH.exists():
-        return []
-
-    import sqlite3
-
-    conn = sqlite3.connect(SQLITE_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = [dict(row) for row in conn.execute("SELECT * FROM books")]
-    finally:
-        conn.close()
-
-    SEED_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SEED_PATH.write_text(
-        json.dumps(rows, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return rows
-
-
-async def migrate_legacy_data() -> None:
-    """Import SQLite/seed books once if Postgres inventory is empty."""
-    if pool is None:
-        return
-
-    async with pool.acquire() as conn:
-        count = await conn.fetchval("SELECT COUNT(*) FROM books")
-        if count and count > 0:
-            return
-
-        rows = _load_legacy_rows()
-        if not rows:
-            return
-
-        async with conn.transaction():
-            for row in rows:
-                created_at = _parse_ts(row.get("created_at"))
-                updated_at = _parse_ts(row.get("updated_at"))
-                await conn.execute(
-                    """
-                    INSERT INTO books (
-                        isbn, title, authors, publication_year, genre, publisher,
-                        cover_url, description, location, notes, source, created_at, updated_at
-                    ) VALUES (
-                        $1, $2, $3, $4, $5, $6,
-                        $7, $8, $9, $10, $11,
-                        COALESCE($12, NOW()),
-                        COALESCE($13, NOW())
-                    )
-                    ON CONFLICT (isbn) DO NOTHING
-                    """,
-                    row.get("isbn"),
-                    row.get("title") or "Untitled",
-                    row.get("authors") or "",
-                    row.get("publication_year"),
-                    row.get("genre") or "",
-                    row.get("publisher") or "",
-                    row.get("cover_url") or "",
-                    row.get("description") or "",
-                    row.get("location") or "",
-                    row.get("notes") or "",
-                    row.get("source") or "",
-                    created_at,
-                    updated_at,
-                )
