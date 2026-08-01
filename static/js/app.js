@@ -4,11 +4,13 @@ const lookupBtn = document.getElementById("lookup-btn");
 const formStatus = document.getElementById("form-status");
 const searchInput = document.getElementById("search-input");
 const clearSearchBtn = document.getElementById("clear-search");
+const viewChips = document.getElementById("view-chips");
 const exportMenu = document.querySelector(".export-menu");
 const bookTbody = document.getElementById("book-tbody");
 const listMeta = document.getElementById("list-meta");
 const emptyState = document.getElementById("empty-state");
 const sortButtons = document.querySelectorAll(".sort-btn");
+const groupToggles = document.querySelectorAll(".group-toggle");
 
 const reviewDialog = document.getElementById("review-dialog");
 const reviewBody = document.getElementById("review-body");
@@ -19,6 +21,7 @@ const detailBody = document.getElementById("detail-body");
 const detailClose = document.getElementById("detail-close");
 
 const SORT_LABELS = {
+  favourite: "favorito",
   title: "título",
   authors: "autor",
   publication_year: "año",
@@ -29,11 +32,22 @@ const SORT_LABELS = {
   notes: "notas",
 };
 
+const GROUP_LABELS = {
+  favourite: "favorito",
+  authors: "autor",
+  genre: "género",
+  location: "ubicación",
+  publisher: "editorial",
+};
+
+const COL_COUNT = 11;
+
 let books = [];
 let searchTimer = null;
 let pendingIsbn = "";
 let sortKey = "title";
 let sortDir = "asc";
+let groupBy = null;
 
 function setStatus(message, isError = false) {
   formStatus.textContent = message;
@@ -73,12 +87,13 @@ function compareValues(a, b) {
   if (emptyA && emptyB) return 0;
   if (emptyA) return 1;
   if (emptyB) return -1;
+  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
   if (typeof a === "number" && typeof b === "number") return a - b;
   return String(a).localeCompare(String(b), "es", { sensitivity: "base", numeric: true });
 }
 
-function sortedBooks() {
-  const copy = [...books];
+function sortedBooks(list = books) {
+  const copy = [...list];
   copy.sort((left, right) => {
     const result = compareValues(left[sortKey], right[sortKey]);
     return sortDir === "asc" ? result : -result;
@@ -86,21 +101,147 @@ function sortedBooks() {
   return copy;
 }
 
+function visibleBooks() {
+  return sortedBooks();
+}
+
+function groupLabel(value, field) {
+  if (field === "favourite") {
+    return value ? "Favoritos" : "Otros";
+  }
+  if (field === "publication_year") {
+    return value == null || value === "" ? "Sin año" : String(value);
+  }
+  const text = String(value ?? "").trim();
+  return text || "Sin clasificar";
+}
+
+function setGroupBy(field) {
+  groupBy = groupBy === field ? null : field;
+  renderList();
+}
+
 function updateSortButtons() {
   sortButtons.forEach((btn) => {
-    const active = btn.dataset.sort === sortKey;
-    const base = btn.textContent.replace(/[↑↓]\s*$/, "").trim();
+    const key = btn.dataset.sort;
+    const active = key === sortKey;
+    const base = key === "favourite" ? "★" : btn.textContent.replace(/[↑↓]\s*$/, "").trim();
     btn.classList.toggle("active", active);
+    if (key === "favourite") {
+      btn.textContent = "★";
+      btn.setAttribute("aria-sort", active ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+      return;
+    }
     btn.textContent = active ? `${base} ${sortDir === "asc" ? "↑" : "↓"}` : base;
   });
+}
+
+function updateGroupToggles() {
+  groupToggles.forEach((btn) => {
+    const active = btn.dataset.group === groupBy;
+    btn.classList.toggle("is-on", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+    const th = btn.closest("th");
+    th?.classList.toggle("is-grouped", active);
+  });
+}
+
+function updateViewChips() {
+  if (!viewChips) return;
+  if (!groupBy) {
+    viewChips.hidden = true;
+    viewChips.innerHTML = "";
+    return;
+  }
+  const label = GROUP_LABELS[groupBy] || groupBy;
+  viewChips.hidden = false;
+  viewChips.innerHTML = `
+    <span class="view-chip">
+      Agrupado por <strong>${escapeHtml(label)}</strong>
+      <button type="button" class="chip-clear" data-clear-group aria-label="Quitar agrupación">×</button>
+    </span>
+  `;
 }
 
 function findBook(isbn) {
   return books.find((book) => book.isbn === isbn);
 }
 
+function bookRowHtml(book) {
+  const fav = Boolean(book.favourite);
+  return `
+    <td class="col-fav">
+      <button
+        type="button"
+        class="fav-btn${fav ? " is-on" : ""}"
+        data-fav-toggle="${escapeHtml(book.isbn)}"
+        title="${fav ? "Quitar de favoritos" : "Marcar favorito"}"
+        aria-pressed="${fav ? "true" : "false"}"
+        aria-label="${fav ? "Quitar de favoritos" : "Marcar favorito"}"
+      >★</button>
+    </td>
+    <td class="col-cover">${coverHtml(book, "cover thumb")}</td>
+    <td class="col-title">
+      <button type="button" class="linkish" data-open="${escapeHtml(book.isbn)}">
+        ${escapeHtml(book.title)}
+      </button>
+    </td>
+    <td title="${escapeHtml(book.authors || "")}">${escapeHtml(truncate(book.authors || "—", 28))}</td>
+    <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
+    <td class="col-isbn"><code>${escapeHtml(book.isbn)}</code></td>
+    <td title="${escapeHtml(book.genre || "")}">${escapeHtml(truncate(book.genre, 28))}</td>
+    <td class="col-location">${escapeHtml(book.location || "—")}</td>
+    <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
+    <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
+    <td class="col-actions">
+      <button type="button" class="btn ghost compact" data-open="${escapeHtml(book.isbn)}">Ver</button>
+      <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.isbn)}" title="Eliminar">✕</button>
+    </td>
+  `;
+}
+
+function appendGroupHeader(label, count) {
+  const tr = document.createElement("tr");
+  tr.className = "group-row";
+  tr.innerHTML = `
+    <td colspan="${COL_COUNT}">
+      <span class="group-label">${escapeHtml(label)}</span>
+      <span class="group-count">${count}</span>
+    </td>
+  `;
+  bookTbody.appendChild(tr);
+}
+
+function appendBookRow(book) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = bookRowHtml(book);
+  bookTbody.appendChild(tr);
+}
+
+function renderGrouped(rows, field) {
+  const groups = new Map();
+  rows.forEach((book) => {
+    const key = groupLabel(book[field], field);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(book);
+  });
+
+  let keys = [...groups.keys()];
+  if (field === "favourite") {
+    keys = ["Favoritos", "Otros"].filter((key) => groups.has(key));
+  } else {
+    keys.sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base", numeric: true }));
+  }
+
+  keys.forEach((key) => {
+    const items = groups.get(key);
+    appendGroupHeader(key, items.length);
+    items.forEach(appendBookRow);
+  });
+}
+
 function renderList() {
-  const rows = sortedBooks();
+  const rows = visibleBooks();
   bookTbody.innerHTML = "";
   emptyState.classList.toggle("hidden", rows.length > 0);
 
@@ -113,30 +254,34 @@ function renderList() {
     : `${rows.length} libro${rows.length === 1 ? "" : "s"} · ${sortHint}`;
 
   updateSortButtons();
+  updateGroupToggles();
+  updateViewChips();
 
-  rows.forEach((book) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="col-cover">${coverHtml(book, "cover thumb")}</td>
-      <td class="col-title">
-        <button type="button" class="linkish" data-open="${escapeHtml(book.isbn)}">
-          ${escapeHtml(book.title)}
-        </button>
-      </td>
-      <td title="${escapeHtml(book.authors || "")}">${escapeHtml(truncate(book.authors || "—", 28))}</td>
-      <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
-      <td class="col-isbn"><code>${escapeHtml(book.isbn)}</code></td>
-      <td title="${escapeHtml(book.genre || "")}">${escapeHtml(truncate(book.genre, 28))}</td>
-      <td class="col-location">${escapeHtml(book.location || "—")}</td>
-      <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
-      <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
-      <td class="col-actions">
-        <button type="button" class="btn ghost compact" data-open="${escapeHtml(book.isbn)}">Ver</button>
-        <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.isbn)}" title="Eliminar">✕</button>
-      </td>
-    `;
-    bookTbody.appendChild(tr);
+  if (groupBy && GROUP_LABELS[groupBy]) {
+    renderGrouped(rows, groupBy);
+    return;
+  }
+
+  rows.forEach(appendBookRow);
+}
+
+async function toggleFavourite(isbn) {
+  const book = findBook(isbn);
+  if (!book) return;
+  const next = !book.favourite;
+  const res = await fetch(`/api/books/${encodeURIComponent(isbn)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ favourite: next }),
   });
+  if (!res.ok) {
+    setStatus("No se pudo actualizar el favorito.", true);
+    return;
+  }
+  const updated = await res.json();
+  const idx = books.findIndex((item) => item.isbn === isbn);
+  if (idx >= 0) books[idx] = updated;
+  renderList();
 }
 
 async function deleteBook(isbn, title) {
@@ -197,6 +342,10 @@ function openReview(isbn, meta) {
             <span>Descripción</span>
             <textarea name="description" rows="3">${escapeHtml(meta.description || "")}</textarea>
           </label>
+          <label class="checkbox-row">
+            <input name="favourite" type="checkbox" />
+            <span>Marcar como favorito</span>
+          </label>
           <input type="hidden" name="cover_url" value="${escapeHtml(meta.cover_url || "")}" />
 
           <div class="detail-actions">
@@ -232,6 +381,7 @@ function openReview(isbn, meta) {
       notes: String(data.get("notes") || "").trim(),
       description: String(data.get("description") || "").trim(),
       cover_url: String(data.get("cover_url") || "").trim(),
+      favourite: data.get("favourite") === "on",
     };
     if (yearRaw) payload.publication_year = Number(yearRaw);
 
@@ -296,6 +446,10 @@ function openDetail(book) {
             <span>Notas</span>
             <textarea name="notes" rows="2">${escapeHtml(book.notes || "")}</textarea>
           </label>
+          <label class="checkbox-row">
+            <input name="favourite" type="checkbox" ${book.favourite ? "checked" : ""} />
+            <span>Favorito</span>
+          </label>
           ${
             book.description
               ? `<p class="detail-description">${escapeHtml(book.description).slice(0, 420)}${book.description.length > 420 ? "…" : ""}</p>`
@@ -319,6 +473,7 @@ function openDetail(book) {
       genre: String(data.get("genre") || "").trim(),
       location: String(data.get("location") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
+      favourite: data.get("favourite") === "on",
     };
     const res = await fetch(`/api/books/${encodeURIComponent(book.isbn)}`, {
       method: "PATCH",
@@ -359,6 +514,12 @@ async function loadBooks(q = "") {
 }
 
 bookTbody.addEventListener("click", async (event) => {
+  const favBtn = event.target.closest("[data-fav-toggle]");
+  if (favBtn) {
+    await toggleFavourite(favBtn.getAttribute("data-fav-toggle"));
+    return;
+  }
+
   const target = event.target.closest("[data-open], [data-delete]");
   if (!target) return;
   const isbn = target.getAttribute("data-open") || target.getAttribute("data-delete");
@@ -378,10 +539,23 @@ sortButtons.forEach((btn) => {
       sortDir = sortDir === "asc" ? "desc" : "asc";
     } else {
       sortKey = key;
-      sortDir = "asc";
+      sortDir = key === "favourite" ? "desc" : "asc";
     }
     renderList();
   });
+});
+
+groupToggles.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    setGroupBy(btn.dataset.group);
+  });
+});
+
+viewChips?.addEventListener("click", (event) => {
+  if (event.target.closest("[data-clear-group]")) {
+    groupBy = null;
+    renderList();
+  }
 });
 
 lookupForm.addEventListener("submit", async (event) => {

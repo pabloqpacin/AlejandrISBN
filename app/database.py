@@ -77,6 +77,12 @@ async def init_db() -> None:
             )
             await conn.execute(
                 """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS favourite BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            await conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_books_title
                 ON books (lower(title))
                 """
@@ -97,6 +103,12 @@ async def init_db() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_books_location
                 ON books (lower(location))
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_books_favourite
+                ON books (favourite)
                 """
             )
 

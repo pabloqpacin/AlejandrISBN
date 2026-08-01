@@ -63,18 +63,46 @@
       </div>
     </div>
 
+    <div id="view-chips" class="view-chips" hidden></div>
+
     <div class="table-wrap">
       <table class="inventory-table" aria-label="Inventario de libros">
         <thead>
           <tr>
+            <th scope="col" class="col-fav">
+              <div class="th-cell">
+                <button type="button" class="sort-btn" data-sort="favourite" title="Ordenar por favorito">★</button>
+                <button type="button" class="group-toggle" data-group="favourite" title="Agrupar por favorito" aria-pressed="false">▦</button>
+              </div>
+            </th>
             <th scope="col" class="col-cover" aria-hidden="true"></th>
             <th scope="col"><button type="button" class="sort-btn" data-sort="title">Título</button></th>
-            <th scope="col"><button type="button" class="sort-btn" data-sort="authors">Autor</button></th>
+            <th scope="col">
+              <div class="th-cell">
+                <button type="button" class="sort-btn" data-sort="authors">Autor</button>
+                <button type="button" class="group-toggle" data-group="authors" title="Agrupar por autor" aria-pressed="false">▦</button>
+              </div>
+            </th>
             <th scope="col" class="col-year"><button type="button" class="sort-btn" data-sort="publication_year">Año</button></th>
             <th scope="col" class="col-isbn"><button type="button" class="sort-btn" data-sort="isbn">ISBN</button></th>
-            <th scope="col"><button type="button" class="sort-btn" data-sort="genre">Género</button></th>
-            <th scope="col" class="col-location"><button type="button" class="sort-btn" data-sort="location">Ubicación</button></th>
-            <th scope="col"><button type="button" class="sort-btn" data-sort="publisher">Editorial</button></th>
+            <th scope="col">
+              <div class="th-cell">
+                <button type="button" class="sort-btn" data-sort="genre">Género</button>
+                <button type="button" class="group-toggle" data-group="genre" title="Agrupar por género" aria-pressed="false">▦</button>
+              </div>
+            </th>
+            <th scope="col" class="col-location">
+              <div class="th-cell">
+                <button type="button" class="sort-btn" data-sort="location">Ubicación</button>
+                <button type="button" class="group-toggle" data-group="location" title="Agrupar por ubicación" aria-pressed="false">▦</button>
+              </div>
+            </th>
+            <th scope="col">
+              <div class="th-cell">
+                <button type="button" class="sort-btn" data-sort="publisher">Editorial</button>
+                <button type="button" class="group-toggle" data-group="publisher" title="Agrupar por editorial" aria-pressed="false">▦</button>
+              </div>
+            </th>
             <th scope="col"><button type="button" class="sort-btn" data-sort="notes">Notas</button></th>
             <th scope="col" class="col-actions"><span class="visually-hidden">Acciones</span></th>
           </tr>

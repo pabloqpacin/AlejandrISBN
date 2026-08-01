@@ -55,39 +55,45 @@ async def health(db: asyncpg.Connection = Depends(get_db)) -> dict:
 @app.get("/api/books", response_model=list[BookOut])
 async def list_books(
     q: Optional[str] = Query(None, description="Search title, author, ISBN, genre, publisher"),
+    favourite: Optional[bool] = Query(None, description="Filter by favourite flag"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: asyncpg.Connection = Depends(get_db),
 ) -> list[BookOut]:
+    clauses: list[str] = []
+    params: list = []
+
     if q and q.strip():
-        term = f"%{q.strip()}%"
-        rows = await db.fetch(
-            """
-            SELECT * FROM books
-            WHERE isbn ILIKE $1
-               OR title ILIKE $1
-               OR authors ILIKE $1
-               OR genre ILIKE $1
-               OR publisher ILIKE $1
-               OR location ILIKE $1
-               OR notes ILIKE $1
-            ORDER BY title ASC
-            LIMIT $2 OFFSET $3
-            """,
-            term,
-            limit,
-            offset,
+        params.append(f"%{q.strip()}%")
+        idx = len(params)
+        clauses.append(
+            f"""(
+                isbn ILIKE ${idx}
+                OR title ILIKE ${idx}
+                OR authors ILIKE ${idx}
+                OR genre ILIKE ${idx}
+                OR publisher ILIKE ${idx}
+                OR location ILIKE ${idx}
+                OR notes ILIKE ${idx}
+            )"""
         )
-    else:
-        rows = await db.fetch(
-            """
-            SELECT * FROM books
-            ORDER BY created_at DESC
-            LIMIT $1 OFFSET $2
-            """,
-            limit,
-            offset,
-        )
+
+    if favourite is not None:
+        params.append(favourite)
+        clauses.append(f"favourite = ${len(params)}")
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.extend([limit, offset])
+    order = "title ASC" if (q and q.strip()) else "created_at DESC"
+    rows = await db.fetch(
+        f"""
+        SELECT * FROM books
+        {where}
+        ORDER BY {order}
+        LIMIT ${len(params) - 1} OFFSET ${len(params)}
+        """,
+        *params,
+    )
     return [row_to_book(row) for row in rows]
 
 
@@ -113,6 +119,7 @@ async def export_books(
                 "description": item.get("description") or "",
                 "location": item.get("location") or "",
                 "notes": item.get("notes") or "",
+                "favourite": bool(item.get("favourite")),
                 "source": item.get("source") or "",
                 "created_at": item.get("created_at"),
                 "updated_at": item.get("updated_at"),
@@ -131,6 +138,7 @@ async def export_books(
             "publisher",
             "location",
             "notes",
+            "favourite",
             "cover_url",
             "description",
             "source",
@@ -185,7 +193,7 @@ async def create_book(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    overrides = payload.model_dump(exclude={"isbn", "location", "notes"}, exclude_none=True)
+    overrides = payload.model_dump(exclude={"isbn", "location", "notes", "favourite"}, exclude_none=True)
     for key, value in overrides.items():
         if isinstance(value, str):
             value = value.strip()
@@ -196,9 +204,9 @@ async def create_book(
         """
         INSERT INTO books (
             isbn, title, authors, publication_year, genre, publisher,
-            cover_url, description, location, notes, source
+            cover_url, description, location, notes, favourite, source
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
         )
         RETURNING *
         """,
@@ -212,6 +220,7 @@ async def create_book(
         meta.get("description") or "",
         payload.location or "",
         payload.notes or "",
+        payload.favourite,
         meta.get("source") or "",
     )
     return row_to_book(row)
@@ -227,6 +236,7 @@ ALLOWED_UPDATE_FIELDS = {
     "description",
     "location",
     "notes",
+    "favourite",
 }
 
 

@@ -89,6 +89,7 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
                 "description": (row.get("description") or "").strip(),
                 "location": (row.get("location") or "").strip(),
                 "notes": (row.get("notes") or "").strip(),
+                "favourite": bool(row.get("favourite", False)),
                 "source": (row.get("source") or "seed").strip() or "seed",
                 "created_at": _parse_ts(row.get("created_at")),
                 "updated_at": _parse_ts(row.get("updated_at")),
@@ -138,12 +139,12 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             """
             INSERT INTO books (
                 isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, source, created_at, updated_at
+                cover_url, description, location, notes, favourite, source, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11,
-                COALESCE($12, NOW()),
-                COALESCE($13, NOW())
+                $7, $8, $9, $10, $11, $12,
+                COALESCE($13, NOW()),
+                COALESCE($14, NOW())
             )
             ON CONFLICT (isbn) DO NOTHING
             """,
@@ -157,6 +158,7 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             book["description"],
             book["location"],
             book["notes"],
+            book["favourite"],
             book["source"],
             book["created_at"],
             book["updated_at"],

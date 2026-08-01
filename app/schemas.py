@@ -23,6 +23,7 @@ class BookCreate(BaseModel):
     description: Optional[str] = None
     location: str = ""
     notes: str = ""
+    favourite: bool = False
 
     @field_validator("isbn")
     @classmethod
@@ -40,6 +41,7 @@ class BookUpdate(BaseModel):
     description: Optional[str] = None
     location: Optional[str] = None
     notes: Optional[str] = None
+    favourite: Optional[bool] = None
 
 
 class BookOut(BaseModel):
@@ -53,6 +55,7 @@ class BookOut(BaseModel):
     description: str = ""
     location: str = ""
     notes: str = ""
+    favourite: bool = False
     source: str = ""
     created_at: str
     updated_at: str
