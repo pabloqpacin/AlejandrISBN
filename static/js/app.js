@@ -1,6 +1,7 @@
 const isbnInput = document.getElementById("isbn-input");
 const lookupForm = document.getElementById("lookup-form");
 const lookupBtn = document.getElementById("lookup-btn");
+const manualBtn = document.getElementById("manual-btn");
 const formStatus = document.getElementById("form-status");
 const searchInput = document.getElementById("search-input");
 const clearSearchBtn = document.getElementById("clear-search");
@@ -81,6 +82,17 @@ function truncate(text, max = 36) {
   const value = String(text || "").trim();
   if (!value) return "—";
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function isLocalId(isbn) {
+  return /^LOCAL-[A-Z0-9]{8,32}$/i.test(String(isbn || "").trim());
+}
+
+function isbnCellHtml(book) {
+  if (isLocalId(book.isbn)) {
+    return `<span class="no-isbn" title="${escapeHtml(book.isbn)}">sin ISBN</span>`;
+  }
+  return `<code>${escapeHtml(book.isbn)}</code>`;
 }
 
 function compareValues(a, b) {
@@ -190,7 +202,7 @@ function bookRowHtml(book) {
     </td>
     <td title="${escapeHtml(book.authors || "")}">${escapeHtml(truncate(book.authors || "—", 28))}</td>
     <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
-    <td class="col-isbn"><code>${escapeHtml(book.isbn)}</code></td>
+    <td class="col-isbn">${isbnCellHtml(book)}</td>
     <td title="${escapeHtml(book.genre || "")}">${escapeHtml(truncate(book.genre, 28))}</td>
     <td class="col-location">${escapeHtml(book.location || "—")}</td>
     <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
@@ -566,6 +578,128 @@ function openReview(isbn, meta) {
   });
 }
 
+function openManual() {
+  pendingIsbn = "";
+  reviewBody.innerHTML = `
+    <div class="review-layout">
+      <div class="detail-cover placeholder" aria-hidden="true">§</div>
+      <div>
+        <p class="review-kicker">Alta manual · sin ISBN</p>
+        <h3 class="review-title">Revista, manual o documento</h3>
+        <p class="authors">Rellena al menos el título. Se guardará un id interno automático.</p>
+
+        <form id="review-form" class="review-form">
+          <label class="field">
+            <span>Título</span>
+            <input name="title" type="text" required autofocus placeholder="Nombre del ítem" />
+          </label>
+          <label class="field">
+            <span>Autor(es) / editorial</span>
+            <input name="authors" type="text" placeholder="Opcional" />
+          </label>
+          <div class="review-grid">
+            <label class="field">
+              <span>Año</span>
+              <input name="publication_year" type="number" min="1000" max="2100" />
+            </label>
+            <label class="field">
+              <span>Editorial / origen</span>
+              <input name="publisher" type="text" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Género / tipo</span>
+            <input name="genre" type="text" placeholder="Revista, manual, documento…" />
+          </label>
+          <label class="field">
+            <span>Ubicación</span>
+            <input name="location" type="text" placeholder="A1, B2, Estantería norte…" />
+          </label>
+          <label class="field">
+            <span>Notas</span>
+            <input name="notes" type="text" placeholder="Volumen, fecha, préstamo…" />
+          </label>
+          <label class="field">
+            <span>Descripción</span>
+            <textarea name="description" rows="3"></textarea>
+          </label>
+          <label class="checkbox-row">
+            <input name="favourite" type="checkbox" />
+            <span>Marcar como favorito</span>
+          </label>
+
+          <div class="detail-actions">
+            <button type="submit" class="btn primary" id="save-review-btn">Guardar en inventario</button>
+            <button type="button" class="btn ghost" id="cancel-review-btn">Cancelar</button>
+          </div>
+          <p id="review-status" class="status" role="status"></p>
+        </form>
+      </div>
+    </div>
+  `;
+
+  const form = reviewBody.querySelector("#review-form");
+  const saveBtn = reviewBody.querySelector("#save-review-btn");
+  const reviewStatus = reviewBody.querySelector("#review-status");
+
+  reviewBody.querySelector("#cancel-review-btn")?.addEventListener("click", () => {
+    reviewDialog.close();
+    setStatus("Alta cancelada.");
+  });
+
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const yearRaw = String(data.get("publication_year") || "").trim();
+    const payload = {
+      title: String(data.get("title") || "").trim(),
+      authors: String(data.get("authors") || "").trim(),
+      genre: String(data.get("genre") || "").trim(),
+      publisher: String(data.get("publisher") || "").trim(),
+      location: String(data.get("location") || "").trim(),
+      notes: String(data.get("notes") || "").trim(),
+      description: String(data.get("description") || "").trim(),
+      favourite: data.get("favourite") === "on",
+    };
+    if (yearRaw) payload.publication_year = Number(yearRaw);
+
+    saveBtn.disabled = true;
+    reviewStatus.textContent = "Guardando…";
+    reviewStatus.classList.remove("error");
+
+    try {
+      const res = await fetch("/api/books", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        reviewStatus.textContent = detailMessage(body.detail) || "No se pudo guardar.";
+        reviewStatus.classList.add("error");
+        return;
+      }
+      reviewDialog.close();
+      setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
+      searchInput.value = "";
+      sortKey = "title";
+      sortDir = "asc";
+      suggestionsLoadedAt = 0;
+      await loadBooks();
+    } catch {
+      reviewStatus.textContent = "Error de red al guardar.";
+      reviewStatus.classList.add("error");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  reviewDialog.showModal();
+  wireFieldSuggestions(reviewBody).then(() => {
+    reviewBody.querySelector('input[name="title"]')?.focus();
+  });
+}
+
 function openDetail(book) {
   detailBody.innerHTML = `
     <div class="detail-layout">
@@ -575,7 +709,14 @@ function openDetail(book) {
         <p class="authors">${escapeHtml(book.authors || "Autor desconocido")}</p>
         <form id="detail-form" class="review-form">
           <dl class="detail-grid detail-grid-2">
-            <div><dt>ISBN</dt><dd>${escapeHtml(book.isbn)}</dd></div>
+            <div>
+              <dt>ISBN</dt>
+              <dd>${
+                isLocalId(book.isbn)
+                  ? `<span class="no-isbn" title="${escapeHtml(book.isbn)}">Sin ISBN</span>`
+                  : escapeHtml(book.isbn)
+              }</dd>
+            </div>
             <div><dt>Año</dt><dd>${escapeHtml(book.publication_year ?? "—")}</dd></div>
             <div><dt>Editorial</dt><dd>${escapeHtml(book.publisher || "—")}</dd></div>
             <div><dt>Fuente</dt><dd>${escapeHtml(book.source || "—")}</dd></div>
@@ -737,6 +878,11 @@ lookupForm.addEventListener("submit", async (event) => {
   } finally {
     lookupBtn.disabled = false;
   }
+});
+
+manualBtn?.addEventListener("click", () => {
+  setStatus("Alta manual: rellena título y el resto a mano.");
+  openManual();
 });
 
 searchInput.addEventListener("input", () => {

@@ -15,7 +15,7 @@
 
   <header class="hero">
     <h1 class="brand">AlejandrISBN</h1>
-    <p class="lede">Inventario lean de biblioteca. Busca por ISBN, revisa los datos y guarda.</p>
+    <p class="lede">Inventario lean de biblioteca. Busca por ISBN o añade revistas, manuales y documentos sin ISBN.</p>
 
     <form id="lookup-form" class="add-form lookup-only" autocomplete="off">
       <label class="field">
@@ -30,7 +30,10 @@
           maxlength="17"
         />
       </label>
-      <button type="submit" class="btn primary" id="lookup-btn">Buscar ISBN</button>
+      <div class="add-actions">
+        <button type="submit" class="btn primary" id="lookup-btn">Buscar ISBN</button>
+        <button type="button" class="btn ghost" id="manual-btn">Sin ISBN</button>
+      </div>
     </form>
     <p id="form-status" class="status" role="status" aria-live="polite"></p>
   </header>

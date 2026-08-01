@@ -59,7 +59,7 @@ Docs: http://localhost:8000/docs
 |--------|------|-------------|
 | `GET` | `/api/books?q=` | Listar / buscar |
 | `GET` | `/api/books/{isbn}` | Detalle |
-| `POST` | `/api/books` | Añadir por ISBN → lookup online + guardar |
+| `POST` | `/api/books` | Añadir por ISBN (lookup) o sin ISBN (`title` obligatorio) |
 | `PATCH` | `/api/books/{isbn}` | Actualizar campos |
 | `DELETE` | `/api/books/{isbn}` | Eliminar |
 | `GET` | `/api/export/books?format=json\|csv` | Descargar inventario (JSON seed o CSV) |

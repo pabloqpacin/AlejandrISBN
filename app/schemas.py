@@ -1,6 +1,10 @@
+import re
+import uuid
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
+
+LOCAL_ID_RE = re.compile(r"^LOCAL-[A-Z0-9]{8,32}$", re.IGNORECASE)
 
 
 def normalize_isbn(value: str) -> str:
@@ -10,10 +14,26 @@ def normalize_isbn(value: str) -> str:
     return cleaned
 
 
-class BookCreate(BaseModel):
-    """Create from ISBN lookup, with optional manual overrides from the review UI."""
+def is_local_id(value: str) -> bool:
+    return bool(LOCAL_ID_RE.match((value or "").strip()))
 
-    isbn: str = Field(..., min_length=10, max_length=17)
+
+def generate_local_id() -> str:
+    return f"LOCAL-{uuid.uuid4().hex[:12].upper()}"
+
+
+def normalize_book_key(value: str) -> str:
+    """Accept a real ISBN or a LOCAL-* inventory id."""
+    raw = (value or "").strip()
+    if is_local_id(raw):
+        return raw.upper()
+    return normalize_isbn(raw)
+
+
+class BookCreate(BaseModel):
+    """Create from ISBN lookup, or manually without ISBN (magazines, manuals, docs)."""
+
+    isbn: Optional[str] = Field(None, max_length=40)
     title: Optional[str] = None
     authors: Optional[str] = None
     publication_year: Optional[int] = None
@@ -25,10 +45,29 @@ class BookCreate(BaseModel):
     notes: str = ""
     favourite: bool = False
 
-    @field_validator("isbn")
-    @classmethod
-    def validate_isbn(cls, value: str) -> str:
-        return normalize_isbn(value)
+    @model_validator(mode="after")
+    def validate_identity(self) -> "BookCreate":
+        isbn = (self.isbn or "").strip()
+        title = (self.title or "").strip()
+
+        if not isbn:
+            if not title:
+                raise ValueError("title is required when creating without ISBN")
+            self.isbn = None
+            self.title = title
+            return self
+
+        if is_local_id(isbn):
+            if not title:
+                raise ValueError("title is required for items without ISBN")
+            self.isbn = isbn.upper()
+            self.title = title
+            return self
+
+        self.isbn = normalize_isbn(isbn)
+        if title:
+            self.title = title
+        return self
 
 
 class BookUpdate(BaseModel):
@@ -61,3 +100,7 @@ class BookOut(BaseModel):
     updated_at: str
 
     model_config = {"from_attributes": True}
+
+    @property
+    def has_isbn(self) -> bool:
+        return not is_local_id(self.isbn)

@@ -110,9 +110,16 @@ body {
 
   .add-form.lookup-only {
     grid-template-columns: 1fr auto;
-    max-width: 28rem;
+    max-width: 36rem;
     margin-inline: auto;
   }
+}
+
+.add-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .field {
@@ -608,6 +615,13 @@ body {
   font-size: 0.78rem;
   color: var(--moss);
   background: transparent;
+}
+
+.no-isbn {
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
 }
 
 .col-actions {

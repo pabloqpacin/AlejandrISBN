@@ -11,7 +11,15 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.database import close_pool, get_db, init_db, init_pool, record_to_dict
-from app.schemas import BookCreate, BookOut, BookUpdate, normalize_isbn
+from app.schemas import (
+    BookCreate,
+    BookOut,
+    BookUpdate,
+    generate_local_id,
+    is_local_id,
+    normalize_book_key,
+    normalize_isbn,
+)
 from app.services.isbn_lookup import lookup_isbn
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -194,7 +202,7 @@ async def get_book(
     db: asyncpg.Connection = Depends(get_db),
 ) -> BookOut:
     try:
-        clean = normalize_isbn(isbn)
+        clean = normalize_book_key(isbn)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -209,6 +217,38 @@ async def create_book(
     payload: BookCreate,
     db: asyncpg.Connection = Depends(get_db),
 ) -> BookOut:
+    # Manual entry (no ISBN): magazines, manuals, documents, etc.
+    if payload.isbn is None or is_local_id(payload.isbn):
+        key = payload.isbn or generate_local_id()
+        existing = await db.fetchval("SELECT isbn FROM books WHERE isbn = $1", key)
+        if existing:
+            raise HTTPException(status_code=409, detail="Item already in inventory")
+
+        row = await db.fetchrow(
+            """
+            INSERT INTO books (
+                isbn, title, authors, publication_year, genre, publisher,
+                cover_url, description, location, notes, favourite, source
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+            )
+            RETURNING *
+            """,
+            key,
+            (payload.title or "").strip(),
+            (payload.authors or "").strip(),
+            payload.publication_year,
+            (payload.genre or "").strip(),
+            (payload.publisher or "").strip(),
+            (payload.cover_url or "").strip(),
+            (payload.description or "").strip(),
+            payload.location or "",
+            payload.notes or "",
+            payload.favourite,
+            "manual",
+        )
+        return row_to_book(row)
+
     existing = await db.fetchval("SELECT isbn FROM books WHERE isbn = $1", payload.isbn)
     if existing:
         raise HTTPException(status_code=409, detail="Book already in inventory")
@@ -272,7 +312,7 @@ async def update_book(
     db: asyncpg.Connection = Depends(get_db),
 ) -> BookOut:
     try:
-        clean = normalize_isbn(isbn)
+        clean = normalize_book_key(isbn)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -314,7 +354,7 @@ async def delete_book(
     db: asyncpg.Connection = Depends(get_db),
 ) -> None:
     try:
-        clean = normalize_isbn(isbn)
+        clean = normalize_book_key(isbn)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
