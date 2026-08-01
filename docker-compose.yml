@@ -1,9 +1,36 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: alejandrisbn-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-alejandrisbn}
+      POSTGRES_USER: ${POSTGRES_USER:-alejandrisbn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-alejandrisbn}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
   alejandrisbn:
     build: .
     container_name: alejandrisbn
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-alejandrisbn}:${POSTGRES_PASSWORD:-alejandrisbn}@db:5432/${POSTGRES_DB:-alejandrisbn}
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      # Keep SQLite/seed around only for one-time legacy import
+      - ./data:/app/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  pgdata:
+    name: alejandrisbn_pgdata

@@ -1,0 +1,58 @@
+[
+  {
+    "isbn": "9780143127550",
+    "title": "Everything I Never Told You",
+    "authors": "Celeste Ng",
+    "publication_year": 2015,
+    "genre": "Grief, Drowning, Death, FICTION / Literary, Daughters, Fiction",
+    "publisher": "Penguin Books",
+    "cover_url": "https://covers.openlibrary.org/b/id/12178284-L.jpg",
+    "description": "",
+    "notes": "Estantería A1",
+    "source": "openlibrary",
+    "created_at": "2026-08-01 16:38:40",
+    "updated_at": "2026-08-01 16:38:40"
+  },
+  {
+    "isbn": "9780451524935",
+    "title": "Nineteen Eighty-Four",
+    "authors": "George Orwell",
+    "publication_year": 1993,
+    "genre": "futurology, censorship, surveillance, rebels, sting operations, historical negationism",
+    "publisher": "Signet Classics",
+    "cover_url": "https://covers.openlibrary.org/b/id/12054527-L.jpg",
+    "description": "It was a bright cold day in April, and the clocks were striking thirteen.",
+    "notes": "",
+    "source": "openlibrary",
+    "created_at": "2026-08-01 16:38:41",
+    "updated_at": "2026-08-01 16:38:41"
+  },
+  {
+    "isbn": "8481369233",
+    "title": "Roque Dalton",
+    "authors": "Roque Dalton",
+    "publication_year": 1995,
+    "genre": "",
+    "publisher": "Txalaparta",
+    "cover_url": "https://covers.openlibrary.org/b/id/12667198-L.jpg",
+    "description": "Includes bibliographical references (p. 195-196).",
+    "notes": "Test",
+    "source": "openlibrary",
+    "created_at": "2026-08-01 16:44:34",
+    "updated_at": "2026-08-01 16:44:34"
+  },
+  {
+    "isbn": "9780385611015",
+    "title": "Making Money",
+    "authors": "Terry Pratchett",
+    "publication_year": 2007,
+    "genre": "Postal service, Discworld (Imaginary place), Science Fiction & Fantasy, Ex-convicts in fiction, Paper money, Ex-convicts",
+    "publisher": "Doubleday",
+    "cover_url": "https://covers.openlibrary.org/b/id/14646640-L.jpg",
+    "description": "",
+    "notes": "",
+    "source": "openlibrary",
+    "created_at": "2026-08-01 16:46:06",
+    "updated_at": "2026-08-01 16:46:06"
+  }
+]

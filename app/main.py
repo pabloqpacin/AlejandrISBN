@@ -2,12 +2,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-import aiosqlite
+import asyncpg
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.database import get_db, init_db
+from app.database import close_pool, get_db, init_db, init_pool, record_to_dict
 from app.schemas import BookCreate, BookOut, BookUpdate, normalize_isbn
 from app.services.isbn_lookup import lookup_isbn
 
@@ -16,8 +16,12 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    await init_pool()
     await init_db()
-    yield
+    try:
+        yield
+    finally:
+        await close_pool()
 
 
 app = FastAPI(
@@ -30,8 +34,8 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-def row_to_book(row: aiosqlite.Row) -> BookOut:
-    return BookOut(**dict(row))
+def row_to_book(row: asyncpg.Record) -> BookOut:
+    return BookOut(**record_to_dict(row))
 
 
 @app.get("/")
@@ -40,8 +44,9 @@ async def index() -> FileResponse:
 
 
 @app.get("/api/health")
-async def health() -> dict:
-    return {"status": "ok", "app": "AlejandrISBN"}
+async def health(db: asyncpg.Connection = Depends(get_db)) -> dict:
+    await db.fetchval("SELECT 1")
+    return {"status": "ok", "app": "AlejandrISBN", "db": "postgres"}
 
 
 @app.get("/api/books", response_model=list[BookOut])
@@ -49,49 +54,50 @@ async def list_books(
     q: Optional[str] = Query(None, description="Search title, author, ISBN, genre, publisher"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ) -> list[BookOut]:
     if q and q.strip():
         term = f"%{q.strip()}%"
-        cursor = await db.execute(
+        rows = await db.fetch(
             """
             SELECT * FROM books
-            WHERE isbn LIKE ? COLLATE NOCASE
-               OR title LIKE ? COLLATE NOCASE
-               OR authors LIKE ? COLLATE NOCASE
-               OR genre LIKE ? COLLATE NOCASE
-               OR publisher LIKE ? COLLATE NOCASE
-               OR notes LIKE ? COLLATE NOCASE
-            ORDER BY title COLLATE NOCASE
-            LIMIT ? OFFSET ?
+            WHERE isbn ILIKE $1
+               OR title ILIKE $1
+               OR authors ILIKE $1
+               OR genre ILIKE $1
+               OR publisher ILIKE $1
+               OR notes ILIKE $1
+            ORDER BY title ASC
+            LIMIT $2 OFFSET $3
             """,
-            (term, term, term, term, term, term, limit, offset),
+            term,
+            limit,
+            offset,
         )
     else:
-        cursor = await db.execute(
+        rows = await db.fetch(
             """
             SELECT * FROM books
             ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
+            LIMIT $1 OFFSET $2
             """,
-            (limit, offset),
+            limit,
+            offset,
         )
-    rows = await cursor.fetchall()
     return [row_to_book(row) for row in rows]
 
 
 @app.get("/api/books/{isbn}", response_model=BookOut)
 async def get_book(
     isbn: str,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ) -> BookOut:
     try:
         clean = normalize_isbn(isbn)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    cursor = await db.execute("SELECT * FROM books WHERE isbn = ?", (clean,))
-    row = await cursor.fetchone()
+    row = await db.fetchrow("SELECT * FROM books WHERE isbn = $1", clean)
     if not row:
         raise HTTPException(status_code=404, detail="Book not found")
     return row_to_book(row)
@@ -100,10 +106,10 @@ async def get_book(
 @app.post("/api/books", response_model=BookOut, status_code=201)
 async def create_book(
     payload: BookCreate,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ) -> BookOut:
-    existing = await db.execute("SELECT isbn FROM books WHERE isbn = ?", (payload.isbn,))
-    if await existing.fetchone():
+    existing = await db.fetchval("SELECT isbn FROM books WHERE isbn = $1", payload.isbn)
+    if existing:
         raise HTTPException(status_code=409, detail="Book already in inventory")
 
     try:
@@ -111,84 +117,97 @@ async def create_book(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    await db.execute(
+    row = await db.fetchrow(
         """
         INSERT INTO books (
             isbn, title, authors, publication_year, genre, publisher,
             cover_url, description, notes, source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+        )
+        RETURNING *
         """,
-        (
-            payload.isbn,
-            meta["title"],
-            meta.get("authors") or "",
-            meta.get("publication_year"),
-            meta.get("genre") or "",
-            meta.get("publisher") or "",
-            meta.get("cover_url") or "",
-            meta.get("description") or "",
-            payload.notes or "",
-            meta.get("source") or "",
-        ),
+        payload.isbn,
+        meta["title"],
+        meta.get("authors") or "",
+        meta.get("publication_year"),
+        meta.get("genre") or "",
+        meta.get("publisher") or "",
+        meta.get("cover_url") or "",
+        meta.get("description") or "",
+        payload.notes or "",
+        meta.get("source") or "",
     )
-    await db.commit()
-
-    cursor = await db.execute("SELECT * FROM books WHERE isbn = ?", (payload.isbn,))
-    row = await cursor.fetchone()
     return row_to_book(row)
+
+
+ALLOWED_UPDATE_FIELDS = {
+    "title",
+    "authors",
+    "publication_year",
+    "genre",
+    "publisher",
+    "cover_url",
+    "description",
+    "notes",
+}
 
 
 @app.patch("/api/books/{isbn}", response_model=BookOut)
 async def update_book(
     isbn: str,
     payload: BookUpdate,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ) -> BookOut:
     try:
         clean = normalize_isbn(isbn)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    cursor = await db.execute("SELECT * FROM books WHERE isbn = ?", (clean,))
-    row = await cursor.fetchone()
+    row = await db.fetchrow("SELECT * FROM books WHERE isbn = $1", clean)
     if not row:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    data = payload.model_dump(exclude_unset=True)
+    data = {
+        key: value
+        for key, value in payload.model_dump(exclude_unset=True).items()
+        if key in ALLOWED_UPDATE_FIELDS
+    }
     if not data:
         return row_to_book(row)
 
-    fields = []
-    values = []
-    for key, value in data.items():
-        fields.append(f"{key} = ?")
+    assignments = []
+    values: list = []
+    for index, (key, value) in enumerate(data.items(), start=1):
+        assignments.append(f"{key} = ${index}")
         values.append(value)
-    fields.append("updated_at = datetime('now')")
     values.append(clean)
+    isbn_param = len(values)
 
-    await db.execute(
-        f"UPDATE books SET {', '.join(fields)} WHERE isbn = ?",
-        values,
+    row = await db.fetchrow(
+        f"""
+        UPDATE books
+        SET {', '.join(assignments)}, updated_at = NOW()
+        WHERE isbn = ${isbn_param}
+        RETURNING *
+        """,
+        *values,
     )
-    await db.commit()
-
-    cursor = await db.execute("SELECT * FROM books WHERE isbn = ?", (clean,))
-    return row_to_book(await cursor.fetchone())
+    return row_to_book(row)
 
 
 @app.delete("/api/books/{isbn}", status_code=204)
 async def delete_book(
     isbn: str,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ) -> None:
     try:
         clean = normalize_isbn(isbn)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    cursor = await db.execute("DELETE FROM books WHERE isbn = ?", (clean,))
-    await db.commit()
-    if cursor.rowcount == 0:
+    result = await db.execute("DELETE FROM books WHERE isbn = $1", clean)
+    if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Book not found")
 
 
