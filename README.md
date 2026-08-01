@@ -8,7 +8,19 @@ Inventario lean de biblioteca: guarda libros por ISBN y completa título, autor,
 - **DB:** SQLite (`data/alejandrisbn.db`)
 - **Frontend:** HTML / CSS / JS servido por la misma app
 
-## Arranque
+## Arranque (Docker)
+
+```bash
+docker compose up --build -d
+```
+
+Abre http://localhost:8000 — la DB SQLite persiste en `./data`.
+
+```bash
+docker compose down
+```
+
+## Arranque (local)
 
 ```bash
 python3 -m venv .venv
@@ -16,8 +28,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
-
-Abre http://localhost:8000
 
 Docs interactivas: http://localhost:8000/docs
 
