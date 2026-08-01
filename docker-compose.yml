@@ -8,6 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-alejandrisbn}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -22,8 +23,11 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-alejandrisbn}:${POSTGRES_PASSWORD:-alejandrisbn}@db:5432/${POSTGRES_DB:-alejandrisbn}
       GOOGLE_BOOKS_API_KEY: ${GOOGLE_BOOKS_API_KEY:-}
+      SEED_DIR: /app/seed
     ports:
       - "8000:8000"
+    volumes:
+      - ./seed:/app/seed:ro
     depends_on:
       db:
         condition: service_healthy

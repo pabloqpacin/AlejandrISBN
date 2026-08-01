@@ -24,6 +24,18 @@ docker compose down          # para contenedores, conserva el volumen
 docker compose down -v       # ¡borra también Postgres!
 ```
 
+## Seeds / bootstrap DB
+
+- **Primer arranque del volumen:** SQL en `postgres/init/` (entrypoint oficial de Postgres).
+- **Día a día:** deja `*.json` o `*.sql` en `seed/` → la API los aplica al arrancar (idempotente por checksum).
+
+Ver `seed/README.md`.
+
+```bash
+cp seed/books.example.json seed/books.json
+docker compose restart alejandrisbn
+```
+
 ## Arranque (local)
 
 Necesitas Postgres accesible y `DATABASE_URL`:

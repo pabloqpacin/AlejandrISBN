@@ -99,3 +99,7 @@ async def init_db() -> None:
                 ON books (lower(location))
                 """
             )
+
+    from app.seed import apply_seeds
+
+    await apply_seeds(pool)

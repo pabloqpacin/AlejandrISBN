@@ -1,0 +1,13 @@
+[
+  {
+    "isbn": "9780143127550",
+    "title": "Everything I Never Told You",
+    "authors": "Celeste Ng",
+    "publication_year": 2015,
+    "genre": "Novela",
+    "publisher": "Penguin Books",
+    "location": "A1",
+    "notes": "Ejemplo de seed JSON",
+    "source": "seed"
+  }
+]

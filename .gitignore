@@ -6,3 +6,7 @@ __pycache__/
 .mypy_cache/
 .env
 .DS_Store
+seed/*
+!seed/README.md
+!seed/*.example.json
+!seed/*.example.sql
