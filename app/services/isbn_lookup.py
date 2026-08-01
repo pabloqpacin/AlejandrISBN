@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import json
 import os
 import re
@@ -115,6 +116,36 @@ def _https(url: str) -> str:
     if url.startswith("http://"):
         return "https://" + url[len("http://") :]
     return url
+
+
+def _clean_text(value: Any) -> str:
+    """Unescape HTML entities and normalize whitespace from scraped fields."""
+    if value is None:
+        return ""
+    text = html_lib.unescape(str(value)).replace("\xa0", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _isbn_equal(a: str, b: str) -> bool:
+    """True when two ISBN strings refer to the same edition (10/13 aware)."""
+    left = (a or "").replace("-", "").upper()
+    right = (b or "").replace("-", "").upper()
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+
+    def forms(value: str) -> set[str]:
+        out = {value}
+        as13 = to_isbn13(value)
+        as10 = to_isbn10(value)
+        if as13:
+            out.add(as13.upper())
+        if as10:
+            out.add(as10.upper())
+        return out
+
+    return bool(forms(left) & forms(right))
 
 
 _BOGUS_TITLE_RE = re.compile(
@@ -363,13 +394,13 @@ def _parse_ttl_book_ldjson(html: str) -> Optional[dict]:
             if "Book" not in type_set:
                 continue
 
-            title = (node.get("name") or "").strip()
+            title = _clean_text(node.get("name"))
             if not title:
                 continue
 
-            authors = _author_names(node.get("author"))
+            authors = [_clean_text(a) for a in _author_names(node.get("author"))]
             cover = node.get("image") or ""
-            description = (node.get("description") or "").strip()
+            description = _clean_text(node.get("description"))
             year = _year_from_text(node.get("datePublished"))
             publisher = ""
             genre = ""
@@ -386,14 +417,14 @@ def _parse_ttl_book_ldjson(html: str) -> Optional[dict]:
 
             brand = re.search(r'item_brand:\s*"([^"]+)"', html)
             if brand:
-                publisher = brand.group(1).strip()
+                publisher = _clean_text(brand.group(1))
 
             crumb = re.search(
                 r"todostuslibros\.com/categoria/[^\"]+\"\s*,\s*\"name\":\s*\"([^\"]+)\"",
                 html,
             )
             if crumb:
-                genre = crumb.group(1).strip()
+                genre = _clean_text(crumb.group(1))
 
             editorial = re.search(
                 r'todostuslibros\.com/editoriales/[^"]+"[^>]*>\s*([^<]+)\s*<',
@@ -401,7 +432,7 @@ def _parse_ttl_book_ldjson(html: str) -> Optional[dict]:
                 flags=re.I,
             )
             if editorial and not publisher:
-                publisher = editorial.group(1).strip()
+                publisher = _clean_text(editorial.group(1))
 
             if not year:
                 fecha = re.search(r"(\d{2}-\d{2}-(19|20)\d{2})", html)
@@ -436,13 +467,11 @@ def _parse_ttl_search(html: str, isbn: str) -> Optional[dict]:
     for match in li_tags:
         attrs, body = match.group(1), match.group(2)
         isbn_hit = re.search(r'data-gtm-isbn="([^"]+)"', attrs)
-        raw = (isbn_hit.group(1) if isbn_hit else "").replace("-", "").upper()
-        if raw == plain or raw == (to_isbn13(plain) or "") or raw == (to_isbn10(plain) or ""):
+        raw = isbn_hit.group(1) if isbn_hit else ""
+        # Exact edition only — TTL search often returns near-miss ISBNs.
+        if raw and _isbn_equal(raw, plain):
             chosen_attrs, chosen_body = attrs, body
             break
-
-    if not chosen_attrs and li_tags and plain in html.replace("-", "").upper():
-        chosen_attrs, chosen_body = li_tags[0].group(1), li_tags[0].group(2)
 
     if not chosen_attrs:
         return None
@@ -457,11 +486,11 @@ def _parse_ttl_search(html: str, isbn: str) -> Optional[dict]:
     if not title:
         return None
     return {
-        "title": title.group(1).strip(),
-        "authors": (authors.group(1).strip() if authors else ""),
+        "title": _clean_text(title.group(1)),
+        "authors": _clean_text(authors.group(1) if authors else ""),
         "publication_year": None,
         "genre": "",
-        "publisher": (publisher.group(1).strip() if publisher else ""),
+        "publisher": _clean_text(publisher.group(1) if publisher else ""),
         "cover_url": _https(img.group(1)) if img else "",
         "description": "",
         "source": "todostuslibros",
@@ -800,67 +829,99 @@ async def _isbnsearch_org(client: httpx.AsyncClient, isbn: str) -> Optional[dict
 
 def _parse_abebooks(html: str, plain: str) -> Optional[dict]:
     """Parse AbeBooks / Iberlibro ISBN search results (same marketplace HTML)."""
-    if plain not in html.replace("-", "") and (to_isbn10(plain) or "") not in html:
+    plain = plain.replace("-", "").upper()
+    isbn10 = (to_isbn10(plain) or "").upper()
+    # Empty / related-results pages still mention the query ISBN — reject them.
+    if re.search(
+        r"no results|we couldn.?t find|did not match any|0 results",
+        html,
+        flags=re.I,
+    ):
         return None
 
-    title = ""
-    m = re.search(r'data-test-id="listing-title"[^>]*>([^<]+)', html, flags=re.I)
-    if m:
-        title = m.group(1).strip()
-    if not title:
-        # "<isbn> - Title by Author – AbeBooks"
-        m = re.search(
-            r"<title>\s*\d[\d-]{8,16}\s*-\s*(.+?)\s+by\s+.+?[–-]\s*(?:AbeBooks|Iberlibro)",
-            html,
-            flags=re.I,
-        )
-        if m:
-            title = m.group(1).strip().rstrip(".")
-    if _is_bogus_title(title):
-        return None
-
-    authors = ""
-    m = re.search(
-        r'data-test-id="listing-author".{0,400}?<a[^>]*>([^<]+)',
+    # Prefer a listing that explicitly links this ISBN (not “related” items).
+    listing = None
+    for m in re.finditer(
+        r'data-test-id="listing-title"[^>]*>([^<]+).{0,2500}?'
+        r'(?:data-csa-c-navigate-identifier="ISBN-(\d+)"|isbn[=/"\s-](\d{10,13}))',
         html,
         flags=re.I | re.S,
-    )
-    if m:
-        authors = m.group(1).strip()
-    if not authors:
+    ):
+        title_cand = m.group(1).strip()
+        listed = (m.group(2) or m.group(3) or "").replace("-", "").upper()
+        if listed in {plain, isbn10} and not _is_bogus_title(title_cand):
+            listing = m
+            break
+
+    title = ""
+    authors = ""
+    publisher = ""
+    year: Optional[int] = None
+    cover = ""
+
+    if listing:
+        title = listing.group(1).strip()
+        chunk_start = max(0, listing.start() - 500)
+        chunk = html[chunk_start : listing.end() + 1200]
+        am = re.search(
+            r'data-test-id="listing-author".{0,400}?<a[^>]*>([^<]+)',
+            chunk,
+            flags=re.I | re.S,
+        )
+        if am:
+            authors = am.group(1).strip()
+        pm = re.search(
+            r'data-test-id="publisher-\d+"[^>]*>\s*Published by\s*([^<]+)',
+            chunk,
+            flags=re.I,
+        )
+        if pm:
+            pub_line = pm.group(1).strip()
+            ym = re.search(r",\s*((?:19|20)\d{2})\s*$", pub_line)
+            if ym:
+                year = int(ym.group(1))
+                publisher = pub_line[: ym.start()].strip(" .,")
+            else:
+                publisher = pub_line.strip(" .,")
+        cm = re.search(
+            rf'src="(https://pictures\.abebooks\.com/isbn/{re.escape(plain)}[^"]*)"',
+            chunk,
+            flags=re.I,
+        )
+        if not cm and isbn10:
+            cm = re.search(
+                rf'src="(https://pictures\.abebooks\.com/isbn/{re.escape(isbn10)}[^"]*)"',
+                chunk,
+                flags=re.I,
+            )
+        if cm:
+            cover = cm.group(1)
+    else:
+        # Title-tag fallback only when it names the book (not bare ISBN pages).
         m = re.search(
-            r"<title>\s*\d[\d-]{8,16}\s*-\s*.+?\s+by\s+(.+?)\s*[–-]\s*(?:AbeBooks|Iberlibro)",
+            r"<title>\s*\d[\d-]{8,16}\s*-\s*(.+?)\s+by\s+(.+?)\s*[–-]\s*(?:AbeBooks|Iberlibro)",
             html,
             flags=re.I,
         )
-        if m:
-            authors = m.group(1).strip()
+        if not m:
+            return None
+        title = m.group(1).strip().rstrip(".")
+        authors = m.group(2).strip()
+        if _is_bogus_title(title):
+            return None
+        # Require a cover or ISBN link for this exact ISBN so related hits don't slip in.
+        if plain not in html and isbn10 not in html:
+            return None
+        cm = re.search(
+            rf'src="(https://pictures\.abebooks\.com/isbn/{re.escape(plain)}[^"]*)"',
+            html,
+            flags=re.I,
+        )
+        if cm:
+            cover = cm.group(1)
 
-    publisher = ""
-    year: Optional[int] = None
-    m = re.search(
-        r'data-test-id="publisher-0"[^>]*>\s*Published by\s*([^<]+)',
-        html,
-        flags=re.I,
-    )
-    if m:
-        pub_line = m.group(1).strip()
-        # "Círculo de Lectores., 1987"
-        ym = re.search(r",\s*((?:19|20)\d{2})\s*$", pub_line)
-        if ym:
-            year = int(ym.group(1))
-            publisher = pub_line[: ym.start()].strip(" .,")
-        else:
-            publisher = pub_line.strip(" .,")
-
-    cover = ""
-    m = re.search(
-        r'src="(https://pictures\.abebooks\.com/isbn/[^"]+)"',
-        html,
-        flags=re.I,
-    )
-    if m:
-        cover = m.group(1)
+    if _is_bogus_title(title):
+        return None
 
     return {
         "title": title,
@@ -908,9 +969,149 @@ async def _abebooks(client: httpx.AsyncClient, isbn: str) -> Optional[dict]:
     return None
 
 
+def _parse_goodreads_ldjson(html: str, plain: str) -> Optional[dict]:
+    """Parse Goodreads book page JSON-LD (schema.org Book)."""
+    plain = plain.replace("-", "")
+    for block in re.finditer(
+        r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
+        html,
+        flags=re.I | re.S,
+    ):
+        raw = block.group(1).strip()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        nodes = data if isinstance(data, list) else [data]
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            if str(node.get("@type", "")).lower() != "book":
+                continue
+            isbn = str(node.get("isbn") or "").replace("-", "")
+            if isbn and isbn != plain and isbn != (to_isbn10(plain) or ""):
+                continue
+            # Some pages omit isbn in ld+json; require ISBN somewhere on page.
+            if not isbn and plain not in html.replace("-", ""):
+                continue
+            title = (node.get("name") or "").strip()
+            if _is_bogus_title(title):
+                continue
+            authors = _join(_author_names(node.get("author")))
+            # Drop imprint-as-author noise when a real author is present
+            if ", " in authors:
+                parts = [p for p in authors.split(", ") if not re.search(
+                    r"\b(press|publishing|publisher|editions?)\b", p, flags=re.I
+                )]
+                if parts:
+                    authors = _join(parts)
+            cover = ""
+            image = node.get("image")
+            if isinstance(image, list) and image:
+                cover = str(image[0])
+            elif isinstance(image, str):
+                cover = image
+            publisher = ""
+            pub_m = re.search(r'"publisher"\s*:\s*"([^"]+)"', html)
+            if pub_m:
+                publisher = pub_m.group(1).strip()
+            year = _year_from_text(node.get("datePublished"))
+            if year is None:
+                # Goodreads often has "Published ... Month D, YYYY" in body text.
+                ym = re.search(
+                    r'itemprop="publicationInfo"[^>]*>.*?((?:19|20)\d{2})',
+                    html,
+                    flags=re.I | re.S,
+                )
+                if ym:
+                    year = int(ym.group(1))
+            return {
+                "title": title,
+                "authors": authors,
+                "publication_year": year,
+                "genre": "",
+                "publisher": publisher,
+                "cover_url": _https(cover),
+                "description": "",
+                "source": "goodreads",
+            }
+    return None
+
+
+async def _goodreads(client: httpx.AsyncClient, isbn: str) -> Optional[dict]:
+    """Goodreads ISBN landing page — solid for Amazon/KDP 979 editions."""
+    plain = isbn.replace("-", "")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
+    }
+    url = f"https://www.goodreads.com/book/isbn/{plain}"
+    try:
+        resp = await client.get(url, headers=headers, follow_redirects=True)
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    # Search/empty pages are not usable
+    if "/book/show/" not in str(resp.url) and plain not in resp.text:
+        return None
+    parsed = _parse_goodreads_ldjson(resp.text, plain)
+    if _usable_hit(parsed):
+        return parsed
+    # og:title fallback when ld+json missing but ISBN is confirmed on page
+    if plain in resp.text.replace("-", ""):
+        og = re.search(r'property="og:title" content="([^"]+)"', resp.text, flags=re.I)
+        if og and not _is_bogus_title(og.group(1)):
+            img = re.search(r'property="og:image" content="([^"]+)"', resp.text, flags=re.I)
+            return {
+                "title": og.group(1).strip(),
+                "authors": "",
+                "publication_year": None,
+                "genre": "",
+                "publisher": "",
+                "cover_url": _https(img.group(1)) if img else "",
+                "description": "",
+                "source": "goodreads",
+            }
+    return None
+
+
+def _mostly_cjk(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return False
+    cjk = sum(
+        1
+        for ch in letters
+        if "\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff"
+    )
+    return cjk >= max(1, (len(letters) + 1) // 2)
+
+
+def _human_genre(value: str) -> str:
+    """Keep readable genres; drop Open Library machine tags like franchise:/form:."""
+    parts: list[str] = []
+    for raw in value.split(","):
+        piece = raw.strip()
+        if not piece:
+            continue
+        if ":" in piece:
+            key, _, rest = piece.partition(":")
+            if key.casefold() in {"genre", "subject", "category"} and rest.strip():
+                parts.append(rest.strip())
+            continue
+        parts.append(piece)
+    return _join(parts)
+
+
 def _merge(*parts: Optional[dict]) -> dict:
     merged = _empty_result()
     sources: list[str] = []
+    text_keys = {"title", "authors", "genre", "publisher", "description", "cover_url"}
     for part in parts:
         if not part or _is_bogus_title(part.get("title")):
             continue
@@ -920,11 +1121,25 @@ def _merge(*parts: Optional[dict]) -> dict:
         for key, value in part.items():
             if key in {"source", "_detail_url"}:
                 continue
+            if key in text_keys and isinstance(value, str):
+                value = _clean_text(value)
+            if key == "genre" and value:
+                value = _human_genre(value)
             if key == "title" and _is_bogus_title(value):
                 continue
             current = merged.get(key)
             empty = current is None or current == ""
             if empty and value not in (None, ""):
+                merged[key] = value
+                continue
+            # Prefer Latin-script author names over CJK-only catalog forms.
+            if (
+                key == "authors"
+                and current
+                and value
+                and _mostly_cjk(str(current))
+                and not _mostly_cjk(str(value))
+            ):
                 merged[key] = value
     merged["source"] = "+".join(dict.fromkeys(sources))
     return merged
@@ -983,6 +1198,7 @@ async def lookup_isbn(isbn: str) -> dict:
             *[_todos_tus_libros(client, v) for v in plain_variants[:1]],
             *[_isbnsearch_org(client, v) for v in plain_variants[:1]],
             *[_abebooks(client, v) for v in plain_variants[:1]],
+            *[_goodreads(client, v) for v in plain_variants[:1]],
             return_exceptions=True,
         )
 
@@ -993,6 +1209,7 @@ async def lookup_isbn(isbn: str) -> dict:
         # Last resort: sequential deeper search over all variants / catalogs
         async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers, follow_redirects=True) as client:
             fetchers = (
+                _goodreads,
                 _abebooks,
                 _isbnsearch_org,
                 _ibs_it,
