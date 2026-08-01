@@ -275,15 +275,25 @@ function updateViewChips() {
   const groupChips = groupByFields
     .map((field, index) => {
       const label = GROUP_LABELS[field] || field;
-      const order = groupByFields.length > 1 ? ` <span class="chip-ord">${index + 1}</span>` : "";
+      const order =
+        groupByFields.length > 1
+          ? `<span class="chip-ord" aria-hidden="true">${index + 1}</span>`
+          : "";
       return `
         <span class="view-chip view-chip-group">
-          Agrupar${order} <strong>${escapeHtml(label)}</strong>
+          ${order}<strong>${escapeHtml(label)}</strong>
           <button type="button" class="chip-clear" data-clear-group="${escapeHtml(field)}" aria-label="Quitar agrupación por ${escapeHtml(label)}">×</button>
         </span>
       `;
     })
     .join("");
+
+  const groupCluster = hasGroups
+    ? `<div class="view-chip-cluster" role="group" aria-label="Agrupación">
+        <span class="view-chip-legend">Agrupado</span>
+        ${groupChips}
+      </div>`
+    : "";
 
   const facetChips = facetFilters
     .map(
@@ -304,13 +314,20 @@ function updateViewChips() {
     )
     .join("");
 
+  const facetCluster = hasFacets
+    ? `<div class="view-chip-cluster" role="group" aria-label="Filtros">
+        <span class="view-chip-legend">Filtros</span>
+        ${facetChips}
+      </div>`
+    : "";
+
   const clearAll =
     hasGroups || hasFacets
       ? `<button type="button" class="view-chip view-chip-clear-all" data-clear-view>Limpiar vista</button>`
       : "";
 
   viewChips.hidden = false;
-  viewChips.innerHTML = `${groupChips}${facetChips}${clearAll}`;
+  viewChips.innerHTML = `${groupCluster}${facetCluster}${clearAll}`;
 }
 
 function findBook(isbn) {
