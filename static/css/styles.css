@@ -714,6 +714,40 @@ html[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
   box-shadow: inset 3px 0 0 var(--moss);
 }
 
+.group-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 100%;
+}
+
+.group-collapse-btn {
+  flex: 0 0 auto;
+  width: 1.45rem;
+  height: 1.45rem;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--moss-deep);
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.group-collapse-btn:hover,
+.group-collapse-btn:focus-visible {
+  opacity: 1;
+  background: var(--accent-chip);
+  outline: none;
+}
+
+.group-row.is-collapsed .group-collapse-btn {
+  opacity: 0.95;
+}
+
 .group-filter-btn {
   display: inline-flex;
   align-items: center;

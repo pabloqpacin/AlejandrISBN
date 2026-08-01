@@ -55,8 +55,26 @@ const VIEW_STATE_KEY = "alejandrisbn-view";
 let groupByFields = [];
 /** @type {{ field: string, key: string, label: string }[]} facet filters — AND */
 let facetFilters = [];
+/** @type {Set<string>} collapsed group ids (`field\\0key`); expanded by default */
+let collapsedGroups = new Set();
 let suggestions = { authors: [], genre: [], location: [] };
 let suggestionsLoadedAt = 0;
+
+function groupCollapseId(field, key) {
+  return `${field}\0${key}`;
+}
+
+function isGroupCollapsed(field, key) {
+  return collapsedGroups.has(groupCollapseId(field, key));
+}
+
+function toggleGroupCollapsed(field, key) {
+  const id = groupCollapseId(field, key);
+  if (collapsedGroups.has(id)) collapsedGroups.delete(id);
+  else collapsedGroups.add(id);
+  saveViewState();
+  renderList();
+}
 
 function loadViewState() {
   try {
@@ -75,6 +93,11 @@ function loadViewState() {
           typeof facet.label === "string",
       );
     }
+    if (Array.isArray(saved.collapsedGroups)) {
+      collapsedGroups = new Set(
+        saved.collapsedGroups.filter((id) => typeof id === "string" && id.includes("\0")),
+      );
+    }
     if (saved.sortKey && SORT_LABELS[saved.sortKey]) {
       sortKey = saved.sortKey;
     }
@@ -90,7 +113,13 @@ function saveViewState() {
   try {
     sessionStorage.setItem(
       VIEW_STATE_KEY,
-      JSON.stringify({ groupByFields, facetFilters, sortKey, sortDir }),
+      JSON.stringify({
+        groupByFields,
+        facetFilters,
+        collapsedGroups: [...collapsedGroups],
+        sortKey,
+        sortDir,
+      }),
     );
   } catch {
     /* ignore quota / private mode */
@@ -368,24 +397,37 @@ function bookRowHtml(book) {
   `;
 }
 
-function appendGroupHeader({ field, key, label, count, depth, filtered }) {
+function appendGroupHeader({ field, key, label, count, depth, filtered, collapsed }) {
   const tr = document.createElement("tr");
-  tr.className = `group-row depth-${Math.min(depth, 4)}${filtered ? " is-filtered" : ""}`;
+  tr.className = `group-row depth-${Math.min(depth, 4)}${filtered ? " is-filtered" : ""}${
+    collapsed ? " is-collapsed" : ""
+  }`;
   tr.innerHTML = `
     <td colspan="${COL_COUNT}">
-      <button
-        type="button"
-        class="group-filter-btn"
-        data-facet-field="${escapeHtml(field)}"
-        data-facet-key="${escapeHtml(key)}"
-        data-facet-label="${escapeHtml(label)}"
-        aria-pressed="${filtered ? "true" : "false"}"
-        title="${filtered ? "Quitar filtro" : "Filtrar por este grupo (se combina con los demás)"}"
-      >
-        <span class="group-label">${escapeHtml(label)}</span>
-        <span class="group-count">${count}</span>
-        <span class="group-filter-hint">${filtered ? "filtro activo" : "filtrar"}</span>
-      </button>
+      <div class="group-heading">
+        <button
+          type="button"
+          class="group-collapse-btn"
+          data-collapse-field="${escapeHtml(field)}"
+          data-collapse-key="${escapeHtml(key)}"
+          aria-expanded="${collapsed ? "false" : "true"}"
+          title="${collapsed ? "Expandir grupo" : "Plegar grupo"}"
+          aria-label="${collapsed ? "Expandir" : "Plegar"} ${escapeHtml(label)}"
+        >${collapsed ? "▸" : "▾"}</button>
+        <button
+          type="button"
+          class="group-filter-btn"
+          data-facet-field="${escapeHtml(field)}"
+          data-facet-key="${escapeHtml(key)}"
+          data-facet-label="${escapeHtml(label)}"
+          aria-pressed="${filtered ? "true" : "false"}"
+          title="${filtered ? "Quitar filtro" : "Filtrar por este grupo (se combina con los demás)"}"
+        >
+          <span class="group-label">${escapeHtml(label)}</span>
+          <span class="group-count">${count}</span>
+          <span class="group-filter-hint">${filtered ? "filtro activo" : "filtrar"}</span>
+        </button>
+      </div>
     </td>
   `;
   bookTbody.appendChild(tr);
@@ -434,6 +476,7 @@ function renderGrouped(rows, fields, depth = 0) {
     const filtered = facetFilters.some(
       (facet) => facet.field === field && facet.key === group.key,
     );
+    const collapsed = isGroupCollapsed(field, group.key);
     appendGroupHeader({
       field,
       key: group.key,
@@ -441,8 +484,11 @@ function renderGrouped(rows, fields, depth = 0) {
       count: group.items.length,
       depth,
       filtered,
+      collapsed,
     });
-    renderGrouped(group.items, rest, depth + 1);
+    if (!collapsed) {
+      renderGrouped(group.items, rest, depth + 1);
+    }
   });
 }
 
@@ -1012,6 +1058,15 @@ async function loadBooks(q = "") {
 }
 
 bookTbody.addEventListener("click", async (event) => {
+  const collapseBtn = event.target.closest("[data-collapse-field]");
+  if (collapseBtn) {
+    toggleGroupCollapsed(
+      collapseBtn.getAttribute("data-collapse-field"),
+      collapseBtn.getAttribute("data-collapse-key"),
+    );
+    return;
+  }
+
   const facetBtn = event.target.closest("[data-facet-field]");
   if (facetBtn) {
     toggleFacetFilter(
@@ -1064,6 +1119,7 @@ viewChips?.addEventListener("click", (event) => {
   if (event.target.closest("[data-clear-view]")) {
     groupByFields = [];
     facetFilters = [];
+    collapsedGroups = new Set();
     saveViewState();
     renderList();
     return;
