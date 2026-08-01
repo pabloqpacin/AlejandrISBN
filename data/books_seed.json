@@ -1,33 +1,5 @@
 [
   {
-    "isbn": "9780143127550",
-    "title": "Everything I Never Told You",
-    "authors": "Celeste Ng",
-    "publication_year": 2015,
-    "genre": "Grief, Drowning, Death, FICTION / Literary, Daughters, Fiction",
-    "publisher": "Penguin Books",
-    "cover_url": "https://covers.openlibrary.org/b/id/12178284-L.jpg",
-    "description": "",
-    "notes": "Estantería A1",
-    "source": "openlibrary",
-    "created_at": "2026-08-01 16:38:40",
-    "updated_at": "2026-08-01 16:38:40"
-  },
-  {
-    "isbn": "9780451524935",
-    "title": "Nineteen Eighty-Four",
-    "authors": "George Orwell",
-    "publication_year": 1993,
-    "genre": "futurology, censorship, surveillance, rebels, sting operations, historical negationism",
-    "publisher": "Signet Classics",
-    "cover_url": "https://covers.openlibrary.org/b/id/12054527-L.jpg",
-    "description": "It was a bright cold day in April, and the clocks were striking thirteen.",
-    "notes": "",
-    "source": "openlibrary",
-    "created_at": "2026-08-01 16:38:41",
-    "updated_at": "2026-08-01 16:38:41"
-  },
-  {
     "isbn": "8481369233",
     "title": "Roque Dalton",
     "authors": "Roque Dalton",
