@@ -152,6 +152,71 @@ body {
   box-shadow: 0 0 0 3px rgba(47, 107, 79, 0.15);
 }
 
+.suggest-field {
+  position: relative;
+}
+
+.suggest-list {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  max-height: 12.5rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(251, 252, 251, 0.98);
+  box-shadow: var(--shadow);
+}
+
+.suggest-list[hidden] {
+  display: none;
+}
+
+.suggest-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.suggest-option:hover,
+.suggest-option.is-active {
+  background: rgba(47, 107, 79, 0.1);
+  color: var(--moss-deep);
+}
+
+.suggest-option-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest-option-count {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--moss);
+  background: rgba(47, 107, 79, 0.12);
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+}
+
 .btn {
   border: none;
   border-radius: var(--radius);

@@ -97,6 +97,31 @@ async def list_books(
     return [row_to_book(row) for row in rows]
 
 
+@app.get("/api/suggestions")
+async def field_suggestions(
+    db: asyncpg.Connection = Depends(get_db),
+) -> dict:
+    """Distinct authors / genre / location values with usage counts for form autocomplete."""
+
+    async def values_for(column: str) -> list[dict]:
+        rows = await db.fetch(
+            f"""
+            SELECT TRIM({column}) AS value, COUNT(*)::int AS count
+            FROM books
+            WHERE TRIM({column}) <> ''
+            GROUP BY TRIM({column})
+            ORDER BY count DESC, value ASC
+            """
+        )
+        return [{"value": row["value"], "count": row["count"]} for row in rows]
+
+    return {
+        "authors": await values_for("authors"),
+        "genre": await values_for("genre"),
+        "location": await values_for("location"),
+    }
+
+
 @app.get("/api/export/books")
 async def export_books(
     format: str = Query("json", pattern="^(json|csv)$"),

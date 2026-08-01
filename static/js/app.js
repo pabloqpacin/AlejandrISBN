@@ -48,6 +48,8 @@ let pendingIsbn = "";
 let sortKey = "title";
 let sortDir = "asc";
 let groupBy = null;
+let suggestions = { authors: [], genre: [], location: [] };
+let suggestionsLoadedAt = 0;
 
 function setStatus(message, isError = false) {
   formStatus.textContent = message;
@@ -292,8 +294,149 @@ async function deleteBook(isbn, title) {
     return false;
   }
   setStatus("Libro eliminado.");
+  suggestionsLoadedAt = 0;
   await loadBooks(searchInput.value.trim());
   return true;
+}
+
+async function loadSuggestions(force = false) {
+  const stale = Date.now() - suggestionsLoadedAt > 30_000;
+  if (!force && suggestionsLoadedAt && !stale) return suggestions;
+  try {
+    const res = await fetch("/api/suggestions");
+    if (!res.ok) return suggestions;
+    suggestions = await res.json();
+    suggestionsLoadedAt = Date.now();
+  } catch {
+    /* keep previous cache */
+  }
+  return suggestions;
+}
+
+function filterSuggestions(items, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return items.slice(0, 12);
+  return items
+    .filter((item) => item.value.toLowerCase().includes(q))
+    .slice(0, 12);
+}
+
+function attachSuggest(input, items, { showCount = false } = {}) {
+  if (!input) return;
+  const wrap = document.createElement("div");
+  wrap.className = "suggest-field";
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+  input.setAttribute("autocomplete", "off");
+  input.setAttribute("spellcheck", "false");
+
+  const list = document.createElement("ul");
+  list.className = "suggest-list";
+  list.hidden = true;
+  list.setAttribute("role", "listbox");
+  wrap.appendChild(list);
+
+  let activeIndex = -1;
+  let visible = [];
+
+  function close() {
+    list.hidden = true;
+    list.innerHTML = "";
+    activeIndex = -1;
+    visible = [];
+  }
+
+  function render() {
+    visible = filterSuggestions(items, input.value);
+    if (!visible.length) {
+      close();
+      return;
+    }
+    list.innerHTML = visible
+      .map(
+        (item, index) => `
+        <li role="presentation">
+          <button
+            type="button"
+            class="suggest-option${index === activeIndex ? " is-active" : ""}"
+            role="option"
+            data-index="${index}"
+            data-value="${escapeHtml(item.value)}"
+          >
+            <span class="suggest-option-value">${escapeHtml(item.value)}</span>
+            ${
+              showCount
+                ? `<span class="suggest-option-count">${item.count}</span>`
+                : ""
+            }
+          </button>
+        </li>
+      `,
+      )
+      .join("");
+    list.hidden = false;
+  }
+
+  function pick(index) {
+    const item = visible[index];
+    if (!item) return;
+    input.value = item.value;
+    close();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+  }
+
+  input.addEventListener("focus", render);
+  input.addEventListener("input", () => {
+    activeIndex = -1;
+    render();
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (list.hidden && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      render();
+    }
+    if (list.hidden) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      activeIndex = (activeIndex + 1) % visible.length;
+      render();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      activeIndex = (activeIndex - 1 + visible.length) % visible.length;
+      render();
+    } else if (event.key === "Enter" && activeIndex >= 0) {
+      event.preventDefault();
+      pick(activeIndex);
+    } else if (event.key === "Escape") {
+      close();
+    }
+  });
+
+  list.addEventListener("mousedown", (event) => {
+    const option = event.target.closest("[data-value]");
+    if (!option) return;
+    event.preventDefault();
+    pick(Number(option.dataset.index));
+  });
+
+  input.addEventListener("blur", () => {
+    window.setTimeout(close, 120);
+  });
+}
+
+async function wireFieldSuggestions(root) {
+  const data = await loadSuggestions();
+  attachSuggest(root.querySelector('input[name="authors"]'), data.authors || [], {
+    showCount: true,
+  });
+  attachSuggest(root.querySelector('input[name="genre"]'), data.genre || [], {
+    showCount: true,
+  });
+  attachSuggest(root.querySelector('input[name="location"]'), data.location || [], {
+    showCount: true,
+  });
 }
 
 function openReview(isbn, meta) {
@@ -407,6 +550,7 @@ function openReview(isbn, meta) {
       searchInput.value = "";
       sortKey = "title";
       sortDir = "asc";
+      suggestionsLoadedAt = 0;
       await loadBooks();
     } catch {
       reviewStatus.textContent = "Error de red al guardar.";
@@ -417,7 +561,9 @@ function openReview(isbn, meta) {
   });
 
   reviewDialog.showModal();
-  reviewBody.querySelector('input[name="location"]')?.focus();
+  wireFieldSuggestions(reviewBody).then(() => {
+    reviewBody.querySelector('input[name="location"]')?.focus();
+  });
 }
 
 function openDetail(book) {
@@ -490,6 +636,7 @@ function openDetail(book) {
     if (idx >= 0) books[idx] = updated;
     detailStatus.textContent = "Cambios guardados.";
     detailStatus.classList.remove("error");
+    suggestionsLoadedAt = 0;
     renderList();
   });
 
@@ -499,6 +646,7 @@ function openDetail(book) {
   });
 
   detailDialog.showModal();
+  wireFieldSuggestions(detailBody);
 }
 
 async function loadBooks(q = "") {
