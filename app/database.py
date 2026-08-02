@@ -50,6 +50,7 @@ async def init_db() -> None:
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS books (

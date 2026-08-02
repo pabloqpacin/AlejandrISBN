@@ -104,15 +104,15 @@ async def list_books(
         idx = len(params)
         term_clauses.append(
             f"""(
-                isbn ILIKE ${idx}
-                OR title ILIKE ${idx}
-                OR authors ILIKE ${idx}
-                OR genre ILIKE ${idx}
-                OR publisher ILIKE ${idx}
-                OR location ILIKE ${idx}
-                OR notes ILIKE ${idx}
-                OR legal_deposit ILIKE ${idx}
-                OR collection ILIKE ${idx}
+                unaccent(isbn) ILIKE unaccent(${idx})
+                OR unaccent(title) ILIKE unaccent(${idx})
+                OR unaccent(authors) ILIKE unaccent(${idx})
+                OR unaccent(genre) ILIKE unaccent(${idx})
+                OR unaccent(publisher) ILIKE unaccent(${idx})
+                OR unaccent(location) ILIKE unaccent(${idx})
+                OR unaccent(notes) ILIKE unaccent(${idx})
+                OR unaccent(legal_deposit) ILIKE unaccent(${idx})
+                OR unaccent(collection) ILIKE unaccent(${idx})
             )"""
         )
     if term_clauses:
