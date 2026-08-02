@@ -1271,10 +1271,10 @@ function openDetail(book) {
     const idx = books.findIndex((item) => item.isbn === book.isbn);
     if (idx >= 0) books[idx] = updated;
     Object.assign(book, updated);
-    detailStatus.textContent = "Cambios guardados.";
-    detailStatus.classList.remove("error");
     suggestionsLoadedAt = 0;
     renderList();
+    detailDialog.close();
+    setStatus(`Guardado: ${updated.title}`);
   });
 
   detailBody.querySelector("[data-delete]")?.addEventListener("click", async () => {
