@@ -267,6 +267,15 @@ function labelsHtml(value, empty = "—") {
     .join("")}</span>`;
 }
 
+function collectionDisplay(book) {
+  const name = String(book.collection || "").trim();
+  const volume = String(book.volume || "").trim();
+  if (!name && !volume) return "";
+  if (!name) return volume;
+  if (!volume) return name;
+  return `${name} · ${volume}`;
+}
+
 function isLocalId(isbn) {
   return /^LOCAL-[A-Z0-9]{8,32}$/i.test(String(isbn || "").trim());
 }
@@ -298,13 +307,21 @@ function compareValues(a, b) {
 function sortedBooks(list = books) {
   const copy = [...list];
   copy.sort((left, right) => {
-    const leftVal = MULTI_LABEL_FIELDS.has(sortKey)
-      ? splitLabels(left[sortKey])[0] || ""
-      : left[sortKey];
-    const rightVal = MULTI_LABEL_FIELDS.has(sortKey)
-      ? splitLabels(right[sortKey])[0] || ""
-      : right[sortKey];
-    const result = compareValues(leftVal, rightVal);
+    let result;
+    if (sortKey === "collection") {
+      result = compareValues(left.collection || "", right.collection || "");
+      if (result === 0) {
+        result = compareValues(left.volume || "", right.volume || "");
+      }
+    } else {
+      const leftVal = MULTI_LABEL_FIELDS.has(sortKey)
+        ? splitLabels(left[sortKey])[0] || ""
+        : left[sortKey];
+      const rightVal = MULTI_LABEL_FIELDS.has(sortKey)
+        ? splitLabels(right[sortKey])[0] || ""
+        : right[sortKey];
+      result = compareValues(leftVal, rightVal);
+    }
     return sortDir === "asc" ? result : -result;
   });
   return copy;
@@ -546,7 +563,7 @@ function bookRowHtml(book) {
     <td class="col-genre">${labelsHtml(book.genre)}</td>
     <td class="col-location">${escapeHtml(book.location || "—")}</td>
     <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
-    <td class="col-collection" title="${escapeHtml(book.collection || "")}">${escapeHtml(truncate(book.collection, 22))}</td>
+    <td class="col-collection" title="${escapeHtml(collectionDisplay(book))}">${escapeHtml(truncate(collectionDisplay(book) || "—", 28))}</td>
     <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
     <td class="col-actions">
       <button type="button" class="btn ghost compact" data-open="${escapeHtml(book.isbn)}">Ver</button>
@@ -934,6 +951,10 @@ function openReview(isbn, meta) {
             <input name="collection" type="text" placeholder="Opcional — serie, colección editorial…" />
           </label>
           <label class="field">
+            <span>Volumen / nº</span>
+            <input name="volume" type="text" placeholder="8, II, tomo 3…" />
+          </label>
+          <label class="field">
             <span>Notas</span>
             <input name="notes" type="text" placeholder="Donación, estado, préstamo…" />
           </label>
@@ -978,6 +999,7 @@ function openReview(isbn, meta) {
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
       collection: String(data.get("collection") || "").trim(),
+      volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       description: String(data.get("description") || "").trim(),
       cover_url: String(data.get("cover_url") || "").trim(),
@@ -1069,8 +1091,12 @@ function openManual() {
             <input name="collection" type="text" placeholder="Opcional — serie, colección editorial…" />
           </label>
           <label class="field">
+            <span>Volumen / nº</span>
+            <input name="volume" type="text" placeholder="8, II, tomo 3…" />
+          </label>
+          <label class="field">
             <span>Notas</span>
-            <input name="notes" type="text" placeholder="Volumen, estado, préstamo…" />
+            <input name="notes" type="text" placeholder="Estado, préstamo…" />
           </label>
           <label class="field">
             <span>Descripción</span>
@@ -1112,6 +1138,7 @@ function openManual() {
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
       collection: String(data.get("collection") || "").trim(),
+      volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       description: String(data.get("description") || "").trim(),
       favourite: data.get("favourite") === "on",
@@ -1202,10 +1229,16 @@ function openDetail(book) {
             <span>Ubicación</span>
             <input name="location" type="text" value="${escapeHtml(book.location || "")}" placeholder="A1, B2…" />
           </label>
-          <label class="field">
-            <span>Colección</span>
-            <input name="collection" type="text" value="${escapeHtml(book.collection || "")}" placeholder="Serie, colección editorial…" />
-          </label>
+          <div class="review-grid">
+            <label class="field">
+              <span>Colección</span>
+              <input name="collection" type="text" value="${escapeHtml(book.collection || "")}" placeholder="Grandes genios…" />
+            </label>
+            <label class="field">
+              <span>Volumen / nº</span>
+              <input name="volume" type="text" value="${escapeHtml(book.volume || "")}" placeholder="8, II…" />
+            </label>
+          </div>
           <label class="field">
             <span>Notas</span>
             <textarea name="notes" rows="2">${escapeHtml(book.notes || "")}</textarea>
@@ -1249,6 +1282,7 @@ function openDetail(book) {
       genre: normalizeLabelField(data.get("genre")),
       location: String(data.get("location") || "").trim(),
       collection: String(data.get("collection") || "").trim(),
+      volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       favourite: data.get("favourite") === "on",
     };

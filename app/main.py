@@ -113,6 +113,7 @@ async def list_books(
                 OR unaccent(notes) ILIKE unaccent(${idx})
                 OR unaccent(legal_deposit) ILIKE unaccent(${idx})
                 OR unaccent(collection) ILIKE unaccent(${idx})
+                OR unaccent(volume) ILIKE unaccent(${idx})
             )"""
         )
     if term_clauses:
@@ -204,6 +205,7 @@ async def export_books(
                 "notes": item.get("notes") or "",
                 "legal_deposit": item.get("legal_deposit") or "",
                 "collection": item.get("collection") or "",
+                "volume": item.get("volume") or "",
                 "favourite": bool(item.get("favourite")),
                 "source": item.get("source") or "",
                 "created_at": item.get("created_at"),
@@ -225,6 +227,7 @@ async def export_books(
             "notes",
             "legal_deposit",
             "collection",
+            "volume",
             "favourite",
             "cover_url",
             "description",
@@ -282,9 +285,9 @@ async def create_book(
             """
             INSERT INTO books (
                 isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, legal_deposit, collection, favourite, source
+                cover_url, description, location, notes, legal_deposit, collection, volume, favourite, source
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
             )
             RETURNING *
             """,
@@ -300,6 +303,7 @@ async def create_book(
             payload.notes or "",
             payload.legal_deposit or "",
             payload.collection or "",
+            payload.volume or "",
             payload.favourite,
             "manual",
         )
@@ -315,7 +319,7 @@ async def create_book(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     overrides = payload.model_dump(
-        exclude={"isbn", "location", "notes", "legal_deposit", "collection", "favourite"},
+        exclude={"isbn", "location", "notes", "legal_deposit", "collection", "volume", "favourite"},
         exclude_none=True,
     )
     for key, value in overrides.items():
@@ -328,9 +332,9 @@ async def create_book(
         """
         INSERT INTO books (
             isbn, title, authors, publication_year, genre, publisher,
-            cover_url, description, location, notes, legal_deposit, collection, favourite, source
+            cover_url, description, location, notes, legal_deposit, collection, volume, favourite, source
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
         )
         RETURNING *
         """,
@@ -346,6 +350,7 @@ async def create_book(
         payload.notes or "",
         payload.legal_deposit or "",
         payload.collection or "",
+        payload.volume or "",
         payload.favourite,
         meta.get("source") or "",
     )
@@ -364,6 +369,7 @@ ALLOWED_UPDATE_FIELDS = {
     "notes",
     "legal_deposit",
     "collection",
+    "volume",
     "favourite",
 }
 
