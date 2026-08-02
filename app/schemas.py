@@ -48,6 +48,122 @@ def normalize_labels(value: Optional[str]) -> str:
     return "; ".join(unique)
 
 
+_AUTHOR_SEP_RE = re.compile(r"\s*[;/]\s*")
+_COLLECTIVE_AUTHOR_RE = re.compile(
+    r"^(aa\.?\s*v\.?v\.?|aavv|vv\.?\s*aa\.?|various authors|varios autores)$",
+    re.IGNORECASE,
+)
+_MIDDLE_INITIAL_RE = re.compile(r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]\.?$")
+# Common compound given names (Spanish / frequent Western pairs), casefolded.
+_COMPOUND_GIVEN = {
+    ("ana", "maría"),
+    ("ana", "maria"),
+    ("carlos", "alberto"),
+    ("charles", "henri"),
+    ("jean", "paul"),
+    ("jean", "pierre"),
+    ("josé", "antonio"),
+    ("jose", "antonio"),
+    ("josé", "luis"),
+    ("jose", "luis"),
+    ("josé", "maría"),
+    ("jose", "maria"),
+    ("juan", "antonio"),
+    ("juan", "carlos"),
+    ("juan", "josé"),
+    ("juan", "jose"),
+    ("juan", "luis"),
+    ("juan", "manuel"),
+    ("juan", "pablo"),
+    ("luis", "miguel"),
+    ("maría", "josé"),
+    ("maria", "jose"),
+    ("maría", "luisa"),
+    ("maria", "luisa"),
+    ("maría", "teresa"),
+    ("maria", "teresa"),
+    ("miguel", "ángel"),
+    ("miguel", "angel"),
+}
+
+
+def _given_token_count(tokens: list[str]) -> int:
+    if len(tokens) < 3:
+        return 1
+    if (tokens[0].casefold(), tokens[1].casefold()) in _COMPOUND_GIVEN:
+        return 2
+    if _MIDDLE_INITIAL_RE.fullmatch(tokens[1]):
+        return 2
+    return 1
+
+
+def invert_person_name(person: str) -> str:
+    """Turn ``Name Surname…`` into ``Surname…, Name``. Leave tidy ``Surname, Name`` as-is."""
+    text = re.sub(r"\s+", " ", (person or "").strip())
+    if not text:
+        return ""
+    if _COLLECTIVE_AUTHOR_RE.match(text):
+        return "AA. VV."
+
+    if "," in text:
+        left, _, right = text.partition(",")
+        left, right = left.strip(), right.strip()
+        if not left or not right:
+            return text
+        left_tokens = left.split(" ")
+        right_tokens = right.split(" ")
+        # Repair prior over-split: "Carlos Berrio…, Juan" → "Berrio…, Juan Carlos"
+        if (
+            len(right_tokens) == 1
+            and len(left_tokens) >= 2
+            and (right_tokens[0].casefold(), left_tokens[0].casefold()) in _COMPOUND_GIVEN
+        ):
+            given = f"{right_tokens[0]} {left_tokens[0]}"
+            surname = " ".join(left_tokens[1:])
+            return f"{surname}, {given}"
+        # Repair "K. Dick, Philip" / "R TOLKIEN, J R" → "Dick, Philip K." / "TOLKIEN, J R R"
+        if len(left_tokens) >= 2:
+            i = 0
+            while i < len(left_tokens) and _MIDDLE_INITIAL_RE.fullmatch(left_tokens[i]):
+                i += 1
+            if 1 <= i < len(left_tokens) and right_tokens:
+                right_all_initials = all(_MIDDLE_INITIAL_RE.fullmatch(t) for t in right_tokens)
+                if right_all_initials or len(right_tokens) == 1:
+                    initials = left_tokens[:i]
+                    surname = " ".join(left_tokens[i:])
+                    given = " ".join([*right_tokens, *initials])
+                    return f"{surname}, {given}"
+        return f"{left}, {right}"
+
+    tokens = text.split(" ")
+    if len(tokens) < 2:
+        return text
+    n_given = _given_token_count(tokens)
+    given = " ".join(tokens[:n_given])
+    surname = " ".join(tokens[n_given:])
+    if not surname:
+        return text
+    return f"{surname}, {given}"
+
+
+def normalize_authors(value: Optional[str]) -> str:
+    """Split on ``;`` / ``/``, invert ``Name Surname`` → ``Surname, Name``, join with ``; ``."""
+    if value is None:
+        return ""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for raw in _AUTHOR_SEP_RE.split(str(value)):
+        person = invert_person_name(raw)
+        if not person:
+            continue
+        key = person.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(person)
+    return "; ".join(unique)
+
+
 class BookCreate(BaseModel):
     """Create from ISBN lookup, or manually without ISBN (magazines, manuals, docs)."""
 
@@ -73,9 +189,9 @@ class BookCreate(BaseModel):
     def validate_identity(self) -> "BookCreate":
         isbn = (self.isbn or "").strip()
         title = (self.title or "").strip()
-        self.authors = normalize_labels(self.authors)
+        self.authors = normalize_authors(self.authors)
         self.genre = normalize_labels(self.genre)
-        self.translators = normalize_labels(self.translators)
+        self.translators = normalize_authors(self.translators)
         self.location = (self.location or "").strip()
         self.notes = (self.notes or "").strip()
         self.collection = (self.collection or "").strip()
@@ -126,11 +242,11 @@ class BookUpdate(BaseModel):
     @model_validator(mode="after")
     def normalize_label_fields(self) -> "BookUpdate":
         if self.authors is not None:
-            self.authors = normalize_labels(self.authors)
+            self.authors = normalize_authors(self.authors)
         if self.genre is not None:
             self.genre = normalize_labels(self.genre)
         if self.translators is not None:
-            self.translators = normalize_labels(self.translators)
+            self.translators = normalize_authors(self.translators)
         if self.collection is not None:
             self.collection = (self.collection or "").strip()
         if self.volume is not None:
