@@ -112,6 +112,7 @@ async def list_books(
                 OR location ILIKE ${idx}
                 OR notes ILIKE ${idx}
                 OR legal_deposit ILIKE ${idx}
+                OR collection ILIKE ${idx}
             )"""
         )
     if term_clauses:
@@ -140,7 +141,7 @@ async def list_books(
 async def field_suggestions(
     db: asyncpg.Connection = Depends(get_db),
 ) -> dict:
-    """Distinct authors / genre / location values with usage counts for form autocomplete.
+    """Distinct authors / genre / location / collection values for form autocomplete.
 
     Authors and genre are treated as ``;``-separated labels (one suggestion per label).
     """
@@ -175,6 +176,7 @@ async def field_suggestions(
         "authors": await label_values_for("authors"),
         "genre": await label_values_for("genre"),
         "location": await values_for("location"),
+        "collection": await values_for("collection"),
     }
 
 
@@ -201,6 +203,7 @@ async def export_books(
                 "location": item.get("location") or "",
                 "notes": item.get("notes") or "",
                 "legal_deposit": item.get("legal_deposit") or "",
+                "collection": item.get("collection") or "",
                 "favourite": bool(item.get("favourite")),
                 "source": item.get("source") or "",
                 "created_at": item.get("created_at"),
@@ -221,6 +224,7 @@ async def export_books(
             "location",
             "notes",
             "legal_deposit",
+            "collection",
             "favourite",
             "cover_url",
             "description",
@@ -278,9 +282,9 @@ async def create_book(
             """
             INSERT INTO books (
                 isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, legal_deposit, favourite, source
+                cover_url, description, location, notes, legal_deposit, collection, favourite, source
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
             )
             RETURNING *
             """,
@@ -295,6 +299,7 @@ async def create_book(
             payload.location or "",
             payload.notes or "",
             payload.legal_deposit or "",
+            payload.collection or "",
             payload.favourite,
             "manual",
         )
@@ -310,7 +315,7 @@ async def create_book(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     overrides = payload.model_dump(
-        exclude={"isbn", "location", "notes", "legal_deposit", "favourite"},
+        exclude={"isbn", "location", "notes", "legal_deposit", "collection", "favourite"},
         exclude_none=True,
     )
     for key, value in overrides.items():
@@ -323,9 +328,9 @@ async def create_book(
         """
         INSERT INTO books (
             isbn, title, authors, publication_year, genre, publisher,
-            cover_url, description, location, notes, legal_deposit, favourite, source
+            cover_url, description, location, notes, legal_deposit, collection, favourite, source
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
         )
         RETURNING *
         """,
@@ -340,6 +345,7 @@ async def create_book(
         payload.location or "",
         payload.notes or "",
         payload.legal_deposit or "",
+        payload.collection or "",
         payload.favourite,
         meta.get("source") or "",
     )
@@ -357,6 +363,7 @@ ALLOWED_UPDATE_FIELDS = {
     "location",
     "notes",
     "legal_deposit",
+    "collection",
     "favourite",
 }
 

@@ -62,6 +62,7 @@ class BookCreate(BaseModel):
     location: str = ""
     notes: str = ""
     legal_deposit: str = ""
+    collection: str = ""
     favourite: bool = False
 
     @model_validator(mode="after")
@@ -70,6 +71,9 @@ class BookCreate(BaseModel):
         title = (self.title or "").strip()
         self.authors = normalize_labels(self.authors)
         self.genre = normalize_labels(self.genre)
+        self.location = (self.location or "").strip()
+        self.notes = (self.notes or "").strip()
+        self.collection = (self.collection or "").strip()
         self.legal_deposit = (self.legal_deposit or "").strip()
         if self.legal_deposit.lower() in {"n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}:
             self.legal_deposit = ""
@@ -105,6 +109,7 @@ class BookUpdate(BaseModel):
     location: Optional[str] = None
     notes: Optional[str] = None
     legal_deposit: Optional[str] = None
+    collection: Optional[str] = None
     favourite: Optional[bool] = None
 
     @model_validator(mode="after")
@@ -113,6 +118,8 @@ class BookUpdate(BaseModel):
             self.authors = normalize_labels(self.authors)
         if self.genre is not None:
             self.genre = normalize_labels(self.genre)
+        if self.collection is not None:
+            self.collection = (self.collection or "").strip()
         return self
 
 
@@ -128,6 +135,7 @@ class BookOut(BaseModel):
     location: str = ""
     notes: str = ""
     legal_deposit: str = ""
+    collection: str = ""
     favourite: bool = False
     source: str = ""
     created_at: str

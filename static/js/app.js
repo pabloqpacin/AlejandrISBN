@@ -31,6 +31,7 @@ const SORT_LABELS = {
   genre: "género",
   location: "ubicación",
   publisher: "editorial",
+  collection: "colección",
   notes: "notas",
 };
 
@@ -40,9 +41,10 @@ const GROUP_LABELS = {
   genre: "género",
   location: "ubicación",
   publisher: "editorial",
+  collection: "colección",
 };
 
-const COL_COUNT = 12;
+const COL_COUNT = 13;
 
 let books = [];
 let searchTimer = null;
@@ -59,7 +61,7 @@ let facetFilters = [];
 let collapsedGroups = new Set();
 /** @type {string[]} committed search terms — OR across inventory fields */
 let searchTerms = [];
-let suggestions = { authors: [], genre: [], location: [] };
+let suggestions = { authors: [], genre: [], location: [], collection: [] };
 let suggestionsLoadedAt = 0;
 
 function groupCollapseId(field, key) {
@@ -544,6 +546,7 @@ function bookRowHtml(book) {
     <td class="col-genre">${labelsHtml(book.genre)}</td>
     <td class="col-location">${escapeHtml(book.location || "—")}</td>
     <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
+    <td class="col-collection" title="${escapeHtml(book.collection || "")}">${escapeHtml(truncate(book.collection, 22))}</td>
     <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
     <td class="col-actions">
       <button type="button" class="btn ghost compact" data-open="${escapeHtml(book.isbn)}">Ver</button>
@@ -883,6 +886,9 @@ async function wireFieldSuggestions(root) {
   attachSuggest(root.querySelector('input[name="location"]'), data.location || [], {
     showCount: true,
   });
+  attachSuggest(root.querySelector('input[name="collection"]'), data.collection || [], {
+    showCount: true,
+  });
 }
 
 function openReview(isbn, meta) {
@@ -922,6 +928,10 @@ function openReview(isbn, meta) {
           <label class="field">
             <span>Ubicación</span>
             <input name="location" type="text" placeholder="A1, B2, Estantería norte…" autofocus />
+          </label>
+          <label class="field">
+            <span>Colección</span>
+            <input name="collection" type="text" placeholder="Opcional — serie, colección editorial…" />
           </label>
           <label class="field">
             <span>Notas</span>
@@ -967,6 +977,7 @@ function openReview(isbn, meta) {
       genre: normalizeLabelField(data.get("genre")),
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
+      collection: String(data.get("collection") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       description: String(data.get("description") || "").trim(),
       cover_url: String(data.get("cover_url") || "").trim(),
@@ -1054,6 +1065,10 @@ function openManual() {
             <input name="location" type="text" placeholder="A1, B2, Estantería norte…" />
           </label>
           <label class="field">
+            <span>Colección</span>
+            <input name="collection" type="text" placeholder="Opcional — serie, colección editorial…" />
+          </label>
+          <label class="field">
             <span>Notas</span>
             <input name="notes" type="text" placeholder="Volumen, estado, préstamo…" />
           </label>
@@ -1096,6 +1111,7 @@ function openManual() {
       genre: normalizeLabelField(data.get("genre")),
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
+      collection: String(data.get("collection") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       description: String(data.get("description") || "").trim(),
       favourite: data.get("favourite") === "on",
@@ -1187,6 +1203,10 @@ function openDetail(book) {
             <input name="location" type="text" value="${escapeHtml(book.location || "")}" placeholder="A1, B2…" />
           </label>
           <label class="field">
+            <span>Colección</span>
+            <input name="collection" type="text" value="${escapeHtml(book.collection || "")}" placeholder="Serie, colección editorial…" />
+          </label>
+          <label class="field">
             <span>Notas</span>
             <textarea name="notes" rows="2">${escapeHtml(book.notes || "")}</textarea>
           </label>
@@ -1228,6 +1248,7 @@ function openDetail(book) {
       legal_deposit: String(data.get("legal_deposit") || "").trim(),
       genre: normalizeLabelField(data.get("genre")),
       location: String(data.get("location") || "").trim(),
+      collection: String(data.get("collection") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       favourite: data.get("favourite") === "on",
     };

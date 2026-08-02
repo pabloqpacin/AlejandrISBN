@@ -127,6 +127,7 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
                 "location": _optional_text(row.get("location")),
                 "notes": _optional_text(row.get("notes")),
                 "legal_deposit": _legal_deposit_from_row(row),
+                "collection": _optional_text(row.get("collection") or row.get("coleccion")),
                 "favourite": bool(row.get("favourite", False)),
                 "source": _optional_text(row.get("source")) or "seed",
                 "created_at": _parse_ts(row.get("created_at")),
@@ -178,6 +179,7 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
         "location": "",
         "notes": "",
         "legal_deposit": "",
+        "collection": "",
         "favourite": False,
         "source": f"seed-csv:{meta.get('source') or 'lookup'}",
         "created_at": None,
@@ -188,6 +190,10 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
         value = _optional_text(row.get(key))
         if value:
             book[key] = value
+
+    collection = _optional_text(row.get("collection") or row.get("coleccion"))
+    if collection:
+        book["collection"] = collection
 
     genre_override = normalize_labels(row.get("genre"))
     if genre_override:
@@ -236,6 +242,7 @@ def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
         "location": _optional_text(row.get("location")),
         "notes": _optional_text(row.get("notes")),
         "legal_deposit": _legal_deposit_from_row(row),
+        "collection": _optional_text(row.get("collection") or row.get("coleccion")),
         "favourite": _parse_bool(row["favourite"])
         if "favourite" in row and _optional_text(row.get("favourite")) != ""
         else False,
@@ -286,12 +293,14 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             """
             INSERT INTO books (
                 isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, legal_deposit, favourite, source, created_at, updated_at
+                cover_url, description, location, notes, legal_deposit, collection,
+                favourite, source, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11, $12, $13,
-                COALESCE($14, NOW()),
-                COALESCE($15, NOW())
+                $7, $8, $9, $10, $11, $12,
+                $13, $14,
+                COALESCE($15, NOW()),
+                COALESCE($16, NOW())
             )
             ON CONFLICT (isbn) DO NOTHING
             """,
@@ -306,6 +315,7 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             book["location"],
             book["notes"],
             book.get("legal_deposit") or "",
+            book.get("collection") or "",
             book["favourite"],
             book["source"],
             book["created_at"],
