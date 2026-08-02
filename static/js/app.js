@@ -1153,6 +1153,16 @@ function openDetail(book) {
             <span>Autor(es)</span>
             <input name="authors" type="text" value="${escapeHtml(book.authors || "")}" placeholder="Apellido, Nombre; Otro autor…" />
           </label>
+          <div class="review-grid">
+            <label class="field">
+              <span>Año</span>
+              <input name="publication_year" type="number" min="1000" max="2100" value="${escapeHtml(book.publication_year ?? "")}" />
+            </label>
+            <label class="field">
+              <span>Editorial</span>
+              <input name="publisher" type="text" value="${escapeHtml(book.publisher || "")}" />
+            </label>
+          </div>
           <dl class="detail-grid detail-grid-2">
             <div>
               <dt>ISBN</dt>
@@ -1162,8 +1172,6 @@ function openDetail(book) {
                   : escapeHtml(book.isbn)
               }</dd>
             </div>
-            <div><dt>Año</dt><dd>${escapeHtml(book.publication_year ?? "—")}</dd></div>
-            <div><dt>Editorial</dt><dd>${escapeHtml(book.publisher || "—")}</dd></div>
             <div><dt>Fuente</dt><dd>${escapeHtml(book.source || "—")}</dd></div>
           </dl>
           <label class="field">
@@ -1211,15 +1219,23 @@ function openDetail(book) {
       detailStatus.classList.add("error");
       return;
     }
+    const yearRaw = String(data.get("publication_year") || "").trim();
     const payload = {
       title,
       authors: normalizeLabelField(data.get("authors")),
+      publisher: String(data.get("publisher") || "").trim(),
+      publication_year: yearRaw ? Number(yearRaw) : null,
       legal_deposit: String(data.get("legal_deposit") || "").trim(),
       genre: normalizeLabelField(data.get("genre")),
       location: String(data.get("location") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       favourite: data.get("favourite") === "on",
     };
+    if (yearRaw && Number.isNaN(payload.publication_year)) {
+      detailStatus.textContent = "El año no es válido.";
+      detailStatus.classList.add("error");
+      return;
+    }
     const res = await fetch(`/api/books/${encodeURIComponent(book.isbn)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
