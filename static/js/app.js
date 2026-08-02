@@ -1053,9 +1053,15 @@ function openDetail(book) {
     <div class="detail-layout">
       ${coverHtml(book, "detail-cover")}
       <div>
-        <h3>${escapeHtml(book.title)}</h3>
-        <p class="authors">${escapeHtml(book.authors || "Autor desconocido")}</p>
         <form id="detail-form" class="review-form">
+          <label class="field">
+            <span>Título</span>
+            <input name="title" type="text" value="${escapeHtml(book.title || "")}" required />
+          </label>
+          <label class="field">
+            <span>Autor(es)</span>
+            <input name="authors" type="text" value="${escapeHtml(book.authors || "")}" placeholder="Apellido, Nombre…" />
+          </label>
           <dl class="detail-grid detail-grid-2">
             <div>
               <dt>ISBN</dt>
@@ -1108,7 +1114,15 @@ function openDetail(book) {
   detailBody.querySelector("#detail-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const title = String(data.get("title") || "").trim();
+    if (!title) {
+      detailStatus.textContent = "El título no puede quedar vacío.";
+      detailStatus.classList.add("error");
+      return;
+    }
     const payload = {
+      title,
+      authors: String(data.get("authors") || "").trim(),
       legal_deposit: String(data.get("legal_deposit") || "").trim(),
       genre: String(data.get("genre") || "").trim(),
       location: String(data.get("location") || "").trim(),
@@ -1128,6 +1142,7 @@ function openDetail(book) {
     const updated = await res.json();
     const idx = books.findIndex((item) => item.isbn === book.isbn);
     if (idx >= 0) books[idx] = updated;
+    Object.assign(book, updated);
     detailStatus.textContent = "Cambios guardados.";
     detailStatus.classList.remove("error");
     suggestionsLoadedAt = 0;
