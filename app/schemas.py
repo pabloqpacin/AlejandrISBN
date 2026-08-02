@@ -30,6 +30,24 @@ def normalize_book_key(value: str) -> str:
     return normalize_isbn(raw)
 
 
+def normalize_labels(value: Optional[str]) -> str:
+    """Normalize ``;``-separated labels (authors, genres): trim empties, join with ``; ``."""
+    if value is None:
+        return ""
+    parts = [part.strip() for part in str(value).split(";")]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        key = part.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(part)
+    return "; ".join(unique)
+
+
 class BookCreate(BaseModel):
     """Create from ISBN lookup, or manually without ISBN (magazines, manuals, docs)."""
 
@@ -50,6 +68,8 @@ class BookCreate(BaseModel):
     def validate_identity(self) -> "BookCreate":
         isbn = (self.isbn or "").strip()
         title = (self.title or "").strip()
+        self.authors = normalize_labels(self.authors)
+        self.genre = normalize_labels(self.genre)
         self.legal_deposit = (self.legal_deposit or "").strip()
         if self.legal_deposit.lower() in {"n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}:
             self.legal_deposit = ""
@@ -86,6 +106,14 @@ class BookUpdate(BaseModel):
     notes: Optional[str] = None
     legal_deposit: Optional[str] = None
     favourite: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def normalize_label_fields(self) -> "BookUpdate":
+        if self.authors is not None:
+            self.authors = normalize_labels(self.authors)
+        if self.genre is not None:
+            self.genre = normalize_labels(self.genre)
+        return self
 
 
 class BookOut(BaseModel):

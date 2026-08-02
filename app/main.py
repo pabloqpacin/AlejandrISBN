@@ -140,7 +140,10 @@ async def list_books(
 async def field_suggestions(
     db: asyncpg.Connection = Depends(get_db),
 ) -> dict:
-    """Distinct authors / genre / location values with usage counts for form autocomplete."""
+    """Distinct authors / genre / location values with usage counts for form autocomplete.
+
+    Authors and genre are treated as ``;``-separated labels (one suggestion per label).
+    """
 
     async def values_for(column: str) -> list[dict]:
         rows = await db.fetch(
@@ -154,9 +157,23 @@ async def field_suggestions(
         )
         return [{"value": row["value"], "count": row["count"]} for row in rows]
 
+    async def label_values_for(column: str) -> list[dict]:
+        rows = await db.fetch(
+            f"""
+            SELECT TRIM(label) AS value, COUNT(*)::int AS count
+            FROM books,
+            LATERAL unnest(string_to_array({column}, ';')) AS label
+            WHERE TRIM(COALESCE({column}, '')) <> ''
+              AND TRIM(label) <> ''
+            GROUP BY TRIM(label)
+            ORDER BY count DESC, value ASC
+            """
+        )
+        return [{"value": row["value"], "count": row["count"]} for row in rows]
+
     return {
-        "authors": await values_for("authors"),
-        "genre": await values_for("genre"),
+        "authors": await label_values_for("authors"),
+        "genre": await label_values_for("genre"),
         "location": await values_for("location"),
     }
 

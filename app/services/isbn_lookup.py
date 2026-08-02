@@ -26,7 +26,7 @@ def _year_from_text(value: Any) -> Optional[int]:
     return int(match.group(0)) if match else None
 
 
-def _join(values: list[str], sep: str = ", ") -> str:
+def _join(values: list[str], sep: str = "; ") -> str:
     cleaned = [v.strip() for v in values if v and str(v).strip()]
     seen: set[str] = set()
     unique: list[str] = []

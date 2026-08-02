@@ -83,7 +83,7 @@ def _legal_deposit_from_row(row: dict[str, Any]) -> str:
 
 
 def _books_from_json(payload: Any) -> list[dict[str, Any]]:
-    from app.schemas import generate_local_id, is_local_id
+    from app.schemas import generate_local_id, is_local_id, normalize_labels
 
     if isinstance(payload, dict):
         if isinstance(payload.get("books"), list):
@@ -118,9 +118,9 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
             {
                 "isbn": isbn,
                 "title": title,
-                "authors": _optional_text(row.get("authors")),
+                "authors": normalize_labels(row.get("authors")),
                 "publication_year": row.get("publication_year"),
-                "genre": _optional_text(row.get("genre")),
+                "genre": normalize_labels(row.get("genre")),
                 "publisher": _optional_text(row.get("publisher")),
                 "cover_url": _optional_text(row.get("cover_url")),
                 "description": _optional_text(row.get("description")),
@@ -162,14 +162,16 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
 
     Lookup always wins for bibliographic fields (title, authors, year, publisher,
     cover, description, source). CSV may still set library fields: location, notes,
-    genre, favourite, legal_deposit.
+    genre, favourite, legal_deposit. Authors/genre are stored as ``;``-separated labels.
     """
+    from app.schemas import normalize_labels
+
     book = {
         "isbn": _normalize_isbn(row.get("isbn") or meta.get("isbn") or ""),
         "title": meta.get("title") or "",
-        "authors": meta.get("authors") or "",
+        "authors": normalize_labels(meta.get("authors") or ""),
         "publication_year": meta.get("publication_year"),
-        "genre": meta.get("genre") or "",
+        "genre": normalize_labels(meta.get("genre") or ""),
         "publisher": meta.get("publisher") or "",
         "cover_url": meta.get("cover_url") or "",
         "description": meta.get("description") or "",
@@ -182,10 +184,14 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
         "updated_at": None,
     }
 
-    for key in ("location", "notes", "genre"):
+    for key in ("location", "notes"):
         value = _optional_text(row.get(key))
         if value:
             book[key] = value
+
+    genre_override = normalize_labels(row.get("genre"))
+    if genre_override:
+        book["genre"] = genre_override
 
     book["legal_deposit"] = _legal_deposit_from_row(row)
 
@@ -203,13 +209,13 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
 
 def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
     """Row without usable ISBN: insert as LOCAL item (title required)."""
-    from app.schemas import generate_local_id
+    from app.schemas import generate_local_id, normalize_labels
 
     title = _optional_text(row.get("title"))
     if not title:
         return None
 
-    authors = _optional_text(row.get("authors") or row.get("autor") or "")
+    authors = normalize_labels(row.get("authors") or row.get("autor") or "")
     year_raw = _optional_text(row.get("publication_year") or row.get("year") or "")
     year = None
     if year_raw:
@@ -223,7 +229,7 @@ def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
         "title": title,
         "authors": authors,
         "publication_year": year,
-        "genre": _optional_text(row.get("genre")),
+        "genre": normalize_labels(row.get("genre")),
         "publisher": _optional_text(row.get("publisher")),
         "cover_url": "",
         "description": _optional_text(row.get("description")),

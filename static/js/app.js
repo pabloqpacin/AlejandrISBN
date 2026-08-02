@@ -229,6 +229,42 @@ function truncate(text, max = 36) {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
+/** Fields stored as ``;``-separated labels (multi-value). */
+const MULTI_LABEL_FIELDS = new Set(["authors", "genre"]);
+
+function splitLabels(value) {
+  return String(value ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function joinLabels(labels) {
+  const seen = new Set();
+  const unique = [];
+  for (const raw of labels) {
+    const part = String(raw || "").trim();
+    if (!part) continue;
+    const key = part.toLocaleLowerCase("es");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(part);
+  }
+  return unique.join("; ");
+}
+
+function normalizeLabelField(value) {
+  return joinLabels(splitLabels(value));
+}
+
+function labelsHtml(value, empty = "—") {
+  const labels = splitLabels(value);
+  if (!labels.length) return empty;
+  return `<span class="field-labels">${labels
+    .map((label) => `<span class="field-label">${escapeHtml(label)}</span>`)
+    .join("")}</span>`;
+}
+
 function isLocalId(isbn) {
   return /^LOCAL-[A-Z0-9]{8,32}$/i.test(String(isbn || "").trim());
 }
@@ -260,7 +296,13 @@ function compareValues(a, b) {
 function sortedBooks(list = books) {
   const copy = [...list];
   copy.sort((left, right) => {
-    const result = compareValues(left[sortKey], right[sortKey]);
+    const leftVal = MULTI_LABEL_FIELDS.has(sortKey)
+      ? splitLabels(left[sortKey])[0] || ""
+      : left[sortKey];
+    const rightVal = MULTI_LABEL_FIELDS.has(sortKey)
+      ? splitLabels(right[sortKey])[0] || ""
+      : right[sortKey];
+    const result = compareValues(leftVal, rightVal);
     return sortDir === "asc" ? result : -result;
   });
   return copy;
@@ -287,8 +329,26 @@ function groupLabel(value, field) {
   return text || "Sin clasificar";
 }
 
+/** One entry per group a book belongs to (multi-label fields expand). */
+function bookGroupEntries(book, field) {
+  if (MULTI_LABEL_FIELDS.has(field)) {
+    const labels = splitLabels(book[field]);
+    if (!labels.length) return [{ key: "", label: "Sin clasificar" }];
+    return labels.map((label) => ({ key: label, label }));
+  }
+  const key = groupKey(book[field], field);
+  return [{ key, label: groupLabel(book[field], field) }];
+}
+
 function bookMatchesFacets(book) {
-  return facetFilters.every((facet) => groupKey(book[facet.field], facet.field) === facet.key);
+  return facetFilters.every((facet) => {
+    if (MULTI_LABEL_FIELDS.has(facet.field)) {
+      const labels = splitLabels(book[facet.field]);
+      if (!labels.length) return facet.key === "";
+      return labels.some((label) => label === facet.key);
+    }
+    return groupKey(book[facet.field], facet.field) === facet.key;
+  });
 }
 
 function visibleBooks() {
@@ -477,11 +537,11 @@ function bookRowHtml(book) {
         ${escapeHtml(book.title)}
       </button>
     </td>
-    <td title="${escapeHtml(book.authors || "")}">${escapeHtml(truncate(book.authors || "—", 28))}</td>
+    <td class="col-authors">${labelsHtml(book.authors)}</td>
     <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
     <td class="col-isbn">${isbnCellHtml(book)}</td>
     <td class="col-dl">${legalDepositCellHtml(book)}</td>
-    <td title="${escapeHtml(book.genre || "")}">${escapeHtml(truncate(book.genre, 28))}</td>
+    <td class="col-genre">${labelsHtml(book.genre)}</td>
     <td class="col-location">${escapeHtml(book.location || "—")}</td>
     <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
     <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
@@ -537,15 +597,16 @@ function appendBookRow(book) {
 function partitionByField(rows, field) {
   const groups = new Map();
   rows.forEach((book) => {
-    const key = groupKey(book[field], field);
-    if (!groups.has(key)) {
-      groups.set(key, {
-        key,
-        label: groupLabel(book[field], field),
-        items: [],
-      });
-    }
-    groups.get(key).items.push(book);
+    bookGroupEntries(book, field).forEach(({ key, label }) => {
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          label,
+          items: [],
+        });
+      }
+      groups.get(key).items.push(book);
+    });
   });
 
   let entries = [...groups.values()];
@@ -668,15 +729,19 @@ async function loadSuggestions(force = false) {
   return suggestions;
 }
 
-function filterSuggestions(items, query) {
+function filterSuggestions(items, query, { exclude = [] } = {}) {
   const q = String(query || "").trim().toLowerCase();
-  if (!q) return items.slice(0, 12);
+  const excluded = new Set(exclude.map((item) => String(item).toLowerCase()));
   return items
-    .filter((item) => item.value.toLowerCase().includes(q))
+    .filter((item) => {
+      const value = item.value.toLowerCase();
+      if (excluded.has(value)) return false;
+      return !q || value.includes(q);
+    })
     .slice(0, 12);
 }
 
-function attachSuggest(input, items, { showCount = false } = {}) {
+function attachSuggest(input, items, { showCount = false, multiLabel = false } = {}) {
   if (!input) return;
   const wrap = document.createElement("div");
   wrap.className = "suggest-field";
@@ -701,8 +766,27 @@ function attachSuggest(input, items, { showCount = false } = {}) {
     visible = [];
   }
 
+  function segmentState() {
+    if (!multiLabel) {
+      return { prefix: "", query: input.value, used: [] };
+    }
+    const raw = input.value;
+    const lastSep = raw.lastIndexOf(";");
+    if (lastSep < 0) {
+      return { prefix: "", query: raw, used: [] };
+    }
+    const prefix = raw.slice(0, lastSep);
+    const query = raw.slice(lastSep + 1);
+    return {
+      prefix,
+      query,
+      used: splitLabels(prefix),
+    };
+  }
+
   function render() {
-    visible = filterSuggestions(items, input.value);
+    const { query, used } = segmentState();
+    visible = filterSuggestions(items, query, { exclude: used });
     if (!visible.length) {
       close();
       return;
@@ -735,7 +819,12 @@ function attachSuggest(input, items, { showCount = false } = {}) {
   function pick(index) {
     const item = visible[index];
     if (!item) return;
-    input.value = item.value;
+    if (multiLabel) {
+      const { used } = segmentState();
+      input.value = joinLabels([...used, item.value]);
+    } else {
+      input.value = item.value;
+    }
     close();
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
@@ -785,9 +874,11 @@ async function wireFieldSuggestions(root) {
   const data = await loadSuggestions();
   attachSuggest(root.querySelector('input[name="authors"]'), data.authors || [], {
     showCount: true,
+    multiLabel: true,
   });
   attachSuggest(root.querySelector('input[name="genre"]'), data.genre || [], {
     showCount: true,
+    multiLabel: true,
   });
   attachSuggest(root.querySelector('input[name="location"]'), data.location || [], {
     showCount: true,
@@ -812,7 +903,7 @@ function openReview(isbn, meta) {
           </label>
           <label class="field">
             <span>Autor(es)</span>
-            <input name="authors" type="text" value="${escapeHtml(meta.authors || "")}" />
+            <input name="authors" type="text" value="${escapeHtml(meta.authors || "")}" placeholder="Apellido, Nombre; Otro autor…" />
           </label>
           <div class="review-grid">
             <label class="field">
@@ -825,8 +916,8 @@ function openReview(isbn, meta) {
             </label>
           </div>
           <label class="field">
-            <span>Género</span>
-            <input name="genre" type="text" value="${escapeHtml(meta.genre || "")}" placeholder="Novela, ensayo, poesía…" />
+            <span>Género(s)</span>
+            <input name="genre" type="text" value="${escapeHtml(meta.genre || "")}" placeholder="Novela; Ensayo; Poesía…" />
           </label>
           <label class="field">
             <span>Ubicación</span>
@@ -872,8 +963,8 @@ function openReview(isbn, meta) {
     const payload = {
       isbn: pendingIsbn,
       title: String(data.get("title") || "").trim(),
-      authors: String(data.get("authors") || "").trim(),
-      genre: String(data.get("genre") || "").trim(),
+      authors: normalizeLabelField(data.get("authors")),
+      genre: normalizeLabelField(data.get("genre")),
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
@@ -938,7 +1029,7 @@ function openManual() {
           </label>
           <label class="field">
             <span>Autor(es)</span>
-            <input name="authors" type="text" placeholder="Apellido, Nombre…" />
+            <input name="authors" type="text" placeholder="Apellido, Nombre; Otro autor…" />
           </label>
           <label class="field">
             <span>Depósito legal</span>
@@ -955,8 +1046,8 @@ function openManual() {
             </label>
           </div>
           <label class="field">
-            <span>Género / tipo</span>
-            <input name="genre" type="text" placeholder="Teatro, revista, manual…" />
+            <span>Género(s)</span>
+            <input name="genre" type="text" placeholder="Teatro; Revista; Manual…" />
           </label>
           <label class="field">
             <span>Ubicación</span>
@@ -1000,9 +1091,9 @@ function openManual() {
     const yearRaw = String(data.get("publication_year") || "").trim();
     const payload = {
       title: String(data.get("title") || "").trim(),
-      authors: String(data.get("authors") || "").trim(),
+      authors: normalizeLabelField(data.get("authors")),
       legal_deposit: String(data.get("legal_deposit") || "").trim(),
-      genre: String(data.get("genre") || "").trim(),
+      genre: normalizeLabelField(data.get("genre")),
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
@@ -1060,7 +1151,7 @@ function openDetail(book) {
           </label>
           <label class="field">
             <span>Autor(es)</span>
-            <input name="authors" type="text" value="${escapeHtml(book.authors || "")}" placeholder="Apellido, Nombre…" />
+            <input name="authors" type="text" value="${escapeHtml(book.authors || "")}" placeholder="Apellido, Nombre; Otro autor…" />
           </label>
           <dl class="detail-grid detail-grid-2">
             <div>
@@ -1080,8 +1171,8 @@ function openDetail(book) {
             <input name="legal_deposit" type="text" value="${escapeHtml(book.legal_deposit || "")}" placeholder="B. 7528-1969" />
           </label>
           <label class="field">
-            <span>Género</span>
-            <input name="genre" type="text" value="${escapeHtml(book.genre || "")}" />
+            <span>Género(s)</span>
+            <input name="genre" type="text" value="${escapeHtml(book.genre || "")}" placeholder="Novela; Ensayo…" />
           </label>
           <label class="field">
             <span>Ubicación</span>
@@ -1122,9 +1213,9 @@ function openDetail(book) {
     }
     const payload = {
       title,
-      authors: String(data.get("authors") || "").trim(),
+      authors: normalizeLabelField(data.get("authors")),
       legal_deposit: String(data.get("legal_deposit") || "").trim(),
-      genre: String(data.get("genre") || "").trim(),
+      genre: normalizeLabelField(data.get("genre")),
       location: String(data.get("location") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       favourite: data.get("favourite") === "on",
