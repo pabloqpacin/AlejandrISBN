@@ -61,7 +61,7 @@ let facetFilters = [];
 let collapsedGroups = new Set();
 /** @type {string[]} committed search terms — OR across inventory fields */
 let searchTerms = [];
-let suggestions = { authors: [], genre: [], location: [], collection: [] };
+let suggestions = { authors: [], genre: [], location: [], collection: [], translators: [] };
 let suggestionsLoadedAt = 0;
 
 function groupCollapseId(field, key) {
@@ -246,7 +246,7 @@ function truncate(text, max = 36) {
 }
 
 /** Fields stored as ``;``-separated labels (multi-value). */
-const MULTI_LABEL_FIELDS = new Set(["authors", "genre"]);
+const MULTI_LABEL_FIELDS = new Set(["authors", "genre", "translators"]);
 
 function splitLabels(value) {
   return String(value ?? "")
@@ -288,6 +288,47 @@ function collectionDisplay(book) {
   if (!name) return volume;
   if (!volume) return name;
   return `${name} · ${volume}`;
+}
+
+/** Advanced bibliographic fields — editor only, not shown in inventory table. */
+function originFieldsHtml(book = {}) {
+  return `
+    <details class="origin-panel">
+      <summary>Origen / traducción</summary>
+      <div class="origin-panel-body">
+        <label class="field">
+          <span>Título original</span>
+          <input name="original_title" type="text" value="${escapeHtml(book.original_title || "")}" placeholder="Título en la lengua original…" />
+        </label>
+        <div class="review-grid">
+          <label class="field">
+            <span>Año original</span>
+            <input name="original_year" type="number" min="1" max="2100" value="${escapeHtml(book.original_year ?? "")}" placeholder="Primera publicación" />
+          </label>
+          <label class="field">
+            <span>Traductor(es)</span>
+            <input name="translators" type="text" value="${escapeHtml(book.translators || "")}" placeholder="Apellido, Nombre; …" />
+          </label>
+        </div>
+        <p class="origin-hint">El año de arriba es el de <em>esta</em> edición; el original es la primera aparición de la obra.</p>
+      </div>
+    </details>
+  `;
+}
+
+function readOriginFields(data) {
+  const yearRaw = String(data.get("original_year") || "").trim();
+  const payload = {
+    original_title: String(data.get("original_title") || "").trim(),
+    translators: normalizeLabelField(data.get("translators")),
+  };
+  if (yearRaw) {
+    const year = Number(yearRaw);
+    if (!Number.isNaN(year)) payload.original_year = year;
+  } else {
+    payload.original_year = null;
+  }
+  return payload;
 }
 
 function isLocalId(isbn) {
@@ -920,6 +961,10 @@ async function wireFieldSuggestions(root) {
   attachSuggest(root.querySelector('input[name="collection"]'), data.collection || [], {
     showCount: true,
   });
+  attachSuggest(root.querySelector('input[name="translators"]'), data.translators || [], {
+    showCount: true,
+    multiLabel: true,
+  });
 }
 
 function openReview(isbn, meta) {
@@ -976,6 +1021,7 @@ function openReview(isbn, meta) {
             <span>Descripción</span>
             <textarea name="description" rows="3">${escapeHtml(meta.description || "")}</textarea>
           </label>
+          ${originFieldsHtml(meta)}
           <label class="checkbox-row">
             <input name="favourite" type="checkbox" />
             <span>Marcar como favorito</span>
@@ -1020,6 +1066,7 @@ function openReview(isbn, meta) {
       description: String(data.get("description") || "").trim(),
       cover_url: String(data.get("cover_url") || "").trim(),
       favourite: data.get("favourite") === "on",
+      ...readOriginFields(data),
     };
     if (yearRaw) payload.publication_year = Number(yearRaw);
 
@@ -1118,6 +1165,7 @@ function openManual() {
             <span>Descripción</span>
             <textarea name="description" rows="3"></textarea>
           </label>
+          ${originFieldsHtml()}
           <label class="checkbox-row">
             <input name="favourite" type="checkbox" />
             <span>Marcar como favorito</span>
@@ -1160,6 +1208,7 @@ function openManual() {
       notes: String(data.get("notes") || "").trim(),
       description: String(data.get("description") || "").trim(),
       favourite: data.get("favourite") === "on",
+      ...readOriginFields(data),
     };
     if (yearRaw) payload.publication_year = Number(yearRaw);
 
@@ -1216,7 +1265,7 @@ function openDetail(book) {
           </label>
           <div class="review-grid">
             <label class="field">
-              <span>Año</span>
+              <span>Año (edición)</span>
               <input name="publication_year" type="number" min="1000" max="2100" value="${escapeHtml(book.publication_year ?? "")}" />
             </label>
             <label class="field">
@@ -1261,6 +1310,7 @@ function openDetail(book) {
             <span>Notas</span>
             <textarea name="notes" rows="2">${escapeHtml(book.notes || "")}</textarea>
           </label>
+          ${originFieldsHtml(book)}
           <label class="checkbox-row">
             <input name="favourite" type="checkbox" ${book.favourite ? "checked" : ""} />
             <span>Favorito</span>
@@ -1305,6 +1355,7 @@ function openDetail(book) {
       volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       favourite: data.get("favourite") === "on",
+      ...readOriginFields(data),
     };
     if (yearRaw && Number.isNaN(payload.publication_year)) {
       detailStatus.textContent = "El año no es válido.";

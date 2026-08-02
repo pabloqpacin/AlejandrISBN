@@ -64,6 +64,9 @@ class BookCreate(BaseModel):
     legal_deposit: str = ""
     collection: str = ""
     volume: str = ""
+    original_year: Optional[int] = None
+    translators: str = ""
+    original_title: str = ""
     favourite: bool = False
 
     @model_validator(mode="after")
@@ -72,10 +75,12 @@ class BookCreate(BaseModel):
         title = (self.title or "").strip()
         self.authors = normalize_labels(self.authors)
         self.genre = normalize_labels(self.genre)
+        self.translators = normalize_labels(self.translators)
         self.location = (self.location or "").strip()
         self.notes = (self.notes or "").strip()
         self.collection = (self.collection or "").strip()
         self.volume = (self.volume or "").strip()
+        self.original_title = (self.original_title or "").strip()
         self.legal_deposit = (self.legal_deposit or "").strip()
         if self.legal_deposit.lower() in {"n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}:
             self.legal_deposit = ""
@@ -113,6 +118,9 @@ class BookUpdate(BaseModel):
     legal_deposit: Optional[str] = None
     collection: Optional[str] = None
     volume: Optional[str] = None
+    original_year: Optional[int] = None
+    translators: Optional[str] = None
+    original_title: Optional[str] = None
     favourite: Optional[bool] = None
 
     @model_validator(mode="after")
@@ -121,10 +129,14 @@ class BookUpdate(BaseModel):
             self.authors = normalize_labels(self.authors)
         if self.genre is not None:
             self.genre = normalize_labels(self.genre)
+        if self.translators is not None:
+            self.translators = normalize_labels(self.translators)
         if self.collection is not None:
             self.collection = (self.collection or "").strip()
         if self.volume is not None:
             self.volume = (self.volume or "").strip()
+        if self.original_title is not None:
+            self.original_title = (self.original_title or "").strip()
         return self
 
 
@@ -142,6 +154,9 @@ class BookOut(BaseModel):
     legal_deposit: str = ""
     collection: str = ""
     volume: str = ""
+    original_year: Optional[int] = None
+    translators: str = ""
+    original_title: str = ""
     favourite: bool = False
     source: str = ""
     created_at: str

@@ -114,6 +114,8 @@ async def list_books(
                 OR unaccent(legal_deposit) ILIKE unaccent(${idx})
                 OR unaccent(collection) ILIKE unaccent(${idx})
                 OR unaccent(volume) ILIKE unaccent(${idx})
+                OR unaccent(translators) ILIKE unaccent(${idx})
+                OR unaccent(original_title) ILIKE unaccent(${idx})
             )"""
         )
     if term_clauses:
@@ -178,6 +180,7 @@ async def field_suggestions(
         "genre": await label_values_for("genre"),
         "location": await values_for("location"),
         "collection": await values_for("collection"),
+        "translators": await label_values_for("translators"),
     }
 
 
@@ -206,6 +209,9 @@ async def export_books(
                 "legal_deposit": item.get("legal_deposit") or "",
                 "collection": item.get("collection") or "",
                 "volume": item.get("volume") or "",
+                "original_year": item.get("original_year"),
+                "translators": item.get("translators") or "",
+                "original_title": item.get("original_title") or "",
                 "favourite": bool(item.get("favourite")),
                 "source": item.get("source") or "",
                 "created_at": item.get("created_at"),
@@ -228,6 +234,9 @@ async def export_books(
             "legal_deposit",
             "collection",
             "volume",
+            "original_year",
+            "translators",
+            "original_title",
             "favourite",
             "cover_url",
             "description",
@@ -285,9 +294,10 @@ async def create_book(
             """
             INSERT INTO books (
                 isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, legal_deposit, collection, volume, favourite, source
+                cover_url, description, location, notes, legal_deposit, collection, volume,
+                original_year, translators, original_title, favourite, source
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
             )
             RETURNING *
             """,
@@ -304,6 +314,9 @@ async def create_book(
             payload.legal_deposit or "",
             payload.collection or "",
             payload.volume or "",
+            payload.original_year,
+            payload.translators or "",
+            payload.original_title or "",
             payload.favourite,
             "manual",
         )
@@ -319,7 +332,18 @@ async def create_book(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     overrides = payload.model_dump(
-        exclude={"isbn", "location", "notes", "legal_deposit", "collection", "volume", "favourite"},
+        exclude={
+            "isbn",
+            "location",
+            "notes",
+            "legal_deposit",
+            "collection",
+            "volume",
+            "original_year",
+            "translators",
+            "original_title",
+            "favourite",
+        },
         exclude_none=True,
     )
     for key, value in overrides.items():
@@ -332,9 +356,10 @@ async def create_book(
         """
         INSERT INTO books (
             isbn, title, authors, publication_year, genre, publisher,
-            cover_url, description, location, notes, legal_deposit, collection, volume, favourite, source
+            cover_url, description, location, notes, legal_deposit, collection, volume,
+            original_year, translators, original_title, favourite, source
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
         )
         RETURNING *
         """,
@@ -351,6 +376,9 @@ async def create_book(
         payload.legal_deposit or "",
         payload.collection or "",
         payload.volume or "",
+        payload.original_year,
+        payload.translators or "",
+        payload.original_title or "",
         payload.favourite,
         meta.get("source") or "",
     )
@@ -370,6 +398,9 @@ ALLOWED_UPDATE_FIELDS = {
     "legal_deposit",
     "collection",
     "volume",
+    "original_year",
+    "translators",
+    "original_title",
     "favourite",
 }
 

@@ -1070,6 +1070,50 @@ html[data-theme="dark"] .detail-dialog::backdrop {
   gap: 0.75rem;
 }
 
+.origin-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.35rem 0.65rem 0.55rem;
+  background: color-mix(in srgb, var(--accent-softer) 35%, transparent);
+}
+
+.origin-panel > summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--moss-deep);
+  padding: 0.35rem 0;
+  list-style: none;
+}
+
+.origin-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.origin-panel > summary::before {
+  content: "▸ ";
+  color: var(--ink-soft);
+}
+
+.origin-panel[open] > summary::before {
+  content: "▾ ";
+}
+
+.origin-panel-body {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.35rem;
+}
+
+.origin-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+
 .review-grid {
   display: grid;
   gap: 0.75rem;
