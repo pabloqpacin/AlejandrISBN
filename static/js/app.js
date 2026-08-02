@@ -225,6 +225,20 @@ function detailMessage(text) {
     : text || "Error";
 }
 
+/** Ctrl/Cmd+Enter submits the form from any field (including textareas). */
+function wireCtrlEnterSubmit(form) {
+  if (!form) return;
+  form.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+    } else {
+      form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    }
+  });
+}
+
 function truncate(text, max = 36) {
   const value = String(text || "").trim();
   if (!value) return "—";
@@ -987,6 +1001,8 @@ function openReview(isbn, meta) {
     setStatus("Alta cancelada.");
   });
 
+  wireCtrlEnterSubmit(form);
+
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(form);
@@ -1126,6 +1142,8 @@ function openManual() {
     setStatus("Alta cancelada.");
   });
 
+  wireCtrlEnterSubmit(form);
+
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(form);
@@ -1253,7 +1271,7 @@ function openDetail(book) {
               : ""
           }
           <div class="detail-actions">
-            <button type="submit" class="btn primary compact">Guardar cambios</button>
+            <button type="submit" class="btn primary compact" title="Ctrl+Enter">Guardar cambios</button>
             <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.isbn)}">Eliminar</button>
           </div>
           <p id="detail-status" class="status" role="status"></p>
@@ -1263,7 +1281,9 @@ function openDetail(book) {
   `;
 
   const detailStatus = detailBody.querySelector("#detail-status");
-  detailBody.querySelector("#detail-form")?.addEventListener("submit", async (event) => {
+  const detailForm = detailBody.querySelector("#detail-form");
+  wireCtrlEnterSubmit(detailForm);
+  detailForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const title = String(data.get("title") || "").trim();
