@@ -85,7 +85,10 @@ async def health(db: asyncpg.Connection = Depends(get_db)) -> dict:
 
 @app.get("/api/books", response_model=list[BookOut], tags=["books"])
 async def list_books(
-    q: Optional[str] = Query(None, description="Search title, author, ISBN, genre, publisher"),
+    q: Optional[list[str]] = Query(
+        None,
+        description="Search terms (repeat param). Match any term; OR across terms.",
+    ),
     favourite: Optional[bool] = Query(None, description="Filter by favourite flag"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -94,10 +97,12 @@ async def list_books(
     clauses: list[str] = []
     params: list = []
 
-    if q and q.strip():
-        params.append(f"%{q.strip()}%")
+    terms = [term.strip() for term in (q or []) if term and term.strip()]
+    term_clauses: list[str] = []
+    for term in terms:
+        params.append(f"%{term}%")
         idx = len(params)
-        clauses.append(
+        term_clauses.append(
             f"""(
                 isbn ILIKE ${idx}
                 OR title ILIKE ${idx}
@@ -109,6 +114,8 @@ async def list_books(
                 OR legal_deposit ILIKE ${idx}
             )"""
         )
+    if term_clauses:
+        clauses.append(f"({' OR '.join(term_clauses)})")
 
     if favourite is not None:
         params.append(favourite)
@@ -116,7 +123,7 @@ async def list_books(
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.extend([limit, offset])
-    order = "title ASC" if (q and q.strip()) else "created_at DESC"
+    order = "title ASC" if terms else "created_at DESC"
     rows = await db.fetch(
         f"""
         SELECT * FROM books

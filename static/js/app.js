@@ -57,6 +57,8 @@ let groupByFields = [];
 let facetFilters = [];
 /** @type {Set<string>} collapsed group ids (`field\\0key`); expanded by default */
 let collapsedGroups = new Set();
+/** @type {string[]} committed search terms — OR across inventory fields */
+let searchTerms = [];
 let suggestions = { authors: [], genre: [], location: [] };
 let suggestionsLoadedAt = 0;
 
@@ -98,6 +100,12 @@ function loadViewState() {
         saved.collapsedGroups.filter((id) => typeof id === "string" && id.includes("\0")),
       );
     }
+    if (Array.isArray(saved.searchTerms)) {
+      searchTerms = saved.searchTerms
+        .map((term) => String(term || "").trim())
+        .filter(Boolean)
+        .slice(0, 12);
+    }
     if (saved.sortKey && SORT_LABELS[saved.sortKey]) {
       sortKey = saved.sortKey;
     }
@@ -117,6 +125,7 @@ function saveViewState() {
         groupByFields,
         facetFilters,
         collapsedGroups: [...collapsedGroups],
+        searchTerms,
         sortKey,
         sortDir,
       }),
@@ -124,6 +133,68 @@ function saveViewState() {
   } catch {
     /* ignore quota / private mode */
   }
+}
+
+function normalizeSearchTerm(value) {
+  return String(value || "").trim();
+}
+
+function activeSearchTerms() {
+  const terms = [...searchTerms];
+  const draft = normalizeSearchTerm(searchInput?.value);
+  if (draft && !terms.some((term) => term.toLowerCase() === draft.toLowerCase())) {
+    terms.push(draft);
+  }
+  return terms;
+}
+
+function hasActiveSearch() {
+  return searchTerms.length > 0 || Boolean(normalizeSearchTerm(searchInput?.value));
+}
+
+function updateClearSearchVisibility() {
+  clearSearchBtn?.classList.toggle("hidden", !hasActiveSearch());
+}
+
+function commitSearchTerms(raw) {
+  const parts = String(raw || "")
+    .split(/[,;]+/)
+    .map(normalizeSearchTerm)
+    .filter(Boolean);
+  if (!parts.length) return false;
+  let changed = false;
+  for (const part of parts) {
+    if (!searchTerms.some((term) => term.toLowerCase() === part.toLowerCase())) {
+      searchTerms = [...searchTerms, part];
+      changed = true;
+    }
+  }
+  if (!changed) {
+    searchInput.value = "";
+    updateClearSearchVisibility();
+    return false;
+  }
+  searchInput.value = "";
+  saveViewState();
+  updateClearSearchVisibility();
+  loadBooks();
+  return true;
+}
+
+function removeSearchTerm(term) {
+  const target = String(term || "").toLowerCase();
+  searchTerms = searchTerms.filter((item) => item.toLowerCase() !== target);
+  saveViewState();
+  updateClearSearchVisibility();
+  loadBooks();
+}
+
+function clearSearch(reload = true) {
+  searchTerms = [];
+  if (searchInput) searchInput.value = "";
+  saveViewState();
+  updateClearSearchVisibility();
+  if (reload) loadBooks();
 }
 
 function setStatus(message, isError = false) {
@@ -295,11 +366,35 @@ function updateViewChips() {
   if (!viewChips) return;
   const hasGroups = groupByFields.length > 0;
   const hasFacets = facetFilters.length > 0;
-  if (!hasGroups && !hasFacets) {
+  const hasSearch = searchTerms.length > 0;
+  if (!hasGroups && !hasFacets && !hasSearch) {
     viewChips.hidden = true;
     viewChips.innerHTML = "";
     return;
   }
+
+  const searchChips = searchTerms
+    .map(
+      (term) => `
+        <span class="view-chip view-chip-search">
+          <strong>${escapeHtml(term)}</strong>
+          <button
+            type="button"
+            class="chip-clear"
+            data-clear-search-term="${escapeHtml(term)}"
+            aria-label="Quitar término ${escapeHtml(term)}"
+          >×</button>
+        </span>
+      `,
+    )
+    .join("");
+
+  const searchCluster = hasSearch
+    ? `<div class="view-chip-cluster" role="group" aria-label="Búsqueda">
+        <span class="view-chip-legend">Buscar</span>
+        ${searchChips}
+      </div>`
+    : "";
 
   const groupChips = groupByFields
     .map((field, index) => {
@@ -351,12 +446,12 @@ function updateViewChips() {
     : "";
 
   const clearAll =
-    hasGroups || hasFacets
+    hasGroups || hasFacets || hasSearch
       ? `<button type="button" class="view-chip view-chip-clear-all" data-clear-view>Limpiar vista</button>`
       : "";
 
   viewChips.hidden = false;
-  viewChips.innerHTML = `${groupCluster}${facetCluster}${clearAll}`;
+  viewChips.innerHTML = `${searchCluster}${groupCluster}${facetCluster}${clearAll}`;
 }
 
 function findBook(isbn) {
@@ -497,9 +592,9 @@ function renderList() {
   bookTbody.innerHTML = "";
   emptyState.classList.toggle("hidden", rows.length > 0);
 
-  const q = searchInput.value.trim();
-  clearSearchBtn.classList.toggle("hidden", !q);
+  updateClearSearchVisibility();
 
+  const terms = activeSearchTerms();
   const sortHint = `orden: ${SORT_LABELS[sortKey]} ${sortDir === "asc" ? "A→Z" : "Z→A"}`;
   const filterHint = facetFilters.length
     ? ` · ${facetFilters.length} filtro${facetFilters.length === 1 ? "" : "s"}`
@@ -507,8 +602,11 @@ function renderList() {
   const groupHint = groupByFields.length
     ? ` · agrupado: ${groupByFields.map((field) => GROUP_LABELS[field] || field).join(" → ")}`
     : "";
-  listMeta.textContent = q
-    ? `${rows.length} resultado${rows.length === 1 ? "" : "s"} para “${q}” · ${sortHint}${filterHint}${groupHint}`
+  const searchHint = terms.length
+    ? ` · buscar: ${terms.map((term) => `“${term}”`).join(" | ")}`
+    : "";
+  listMeta.textContent = terms.length
+    ? `${rows.length} resultado${rows.length === 1 ? "" : "s"}${searchHint} · ${sortHint}${filterHint}${groupHint}`
     : `${rows.length} libro${rows.length === 1 ? "" : "s"} · ${sortHint}${filterHint}${groupHint}`;
 
   updateSortButtons();
@@ -552,7 +650,7 @@ async function deleteBook(isbn, title) {
   }
   setStatus("Libro eliminado.");
   suggestionsLoadedAt = 0;
-  await loadBooks(searchInput.value.trim());
+  await loadBooks();
   return true;
 }
 
@@ -804,7 +902,7 @@ function openReview(isbn, meta) {
       reviewDialog.close();
       isbnInput.value = "";
       setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
-      searchInput.value = "";
+      clearSearch(false);
       sortKey = "title";
       sortDir = "asc";
       suggestionsLoadedAt = 0;
@@ -931,7 +1029,7 @@ function openManual() {
       }
       reviewDialog.close();
       setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
-      searchInput.value = "";
+      clearSearch(false);
       sortKey = "title";
       sortDir = "asc";
       suggestionsLoadedAt = 0;
@@ -1045,9 +1143,11 @@ function openDetail(book) {
   wireFieldSuggestions(detailBody);
 }
 
-async function loadBooks(q = "") {
+async function loadBooks() {
   const params = new URLSearchParams({ limit: "200" });
-  if (q) params.set("q", q);
+  for (const term of activeSearchTerms()) {
+    params.append("q", term);
+  }
   const res = await fetch(`/api/books?${params}`);
   if (!res.ok) {
     setStatus("Error al cargar el inventario.", true);
@@ -1120,8 +1220,14 @@ viewChips?.addEventListener("click", (event) => {
     groupByFields = [];
     facetFilters = [];
     collapsedGroups = new Set();
+    clearSearch(false);
     saveViewState();
-    renderList();
+    loadBooks();
+    return;
+  }
+  const clearSearchTerm = event.target.closest("[data-clear-search-term]");
+  if (clearSearchTerm) {
+    removeSearchTerm(clearSearchTerm.getAttribute("data-clear-search-term"));
     return;
   }
   const clearGroup = event.target.closest("[data-clear-group]");
@@ -1178,16 +1284,24 @@ manualBtn?.addEventListener("click", () => {
 
 searchInput.addEventListener("input", () => {
   clearTimeout(searchTimer);
-  clearSearchBtn.classList.toggle("hidden", !searchInput.value.trim());
+  updateClearSearchVisibility();
   searchTimer = setTimeout(() => {
-    loadBooks(searchInput.value.trim());
+    loadBooks();
   }, 250);
 });
 
+searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    clearTimeout(searchTimer);
+    commitSearchTerms(searchInput.value);
+  } else if (event.key === "Backspace" && !searchInput.value && searchTerms.length) {
+    removeSearchTerm(searchTerms[searchTerms.length - 1]);
+  }
+});
+
 clearSearchBtn.addEventListener("click", () => {
-  searchInput.value = "";
-  clearSearchBtn.classList.add("hidden");
-  loadBooks();
+  clearSearch();
 });
 
 async function exportInventory(format) {
