@@ -64,8 +64,8 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 - **Primer arranque del volumen:** SQL en `postgres/init/` (entrypoint oficial de Postgres).
 - **Día a día:** deja `*.json`, `*.csv` o `*.sql` en `seed/` → la API los aplica al arrancar (idempotente por checksum).
-  - **JSON** → escribe filas directamente en la DB
-  - **CSV** → lookup online por cada ISBN, luego inserta (puedes pasar `location`, `notes`, etc.)
+  - **JSON / CSV** → escribe filas directamente (sin red)
+  - Luego, en la UI: **Completar online** para rellenar vacíos con preview/confirmación
 
 Ver `seed/README.md`.
 
@@ -99,7 +99,9 @@ Docs: http://localhost:8000/docs
 | `PATCH` | `/api/books/{isbn}` | Actualizar campos |
 | `DELETE` | `/api/books/{isbn}` | Eliminar |
 | `GET` | `/api/export/books?format=json\|csv` | Descargar inventario (JSON seed o CSV) |
-| `POST` | `/api/import/books` | Importar JSON (multipart `file`) |
+| `POST` | `/api/import/books` | Importar JSON/CSV (multipart `file`, sin red) |
+| `POST` | `/api/enrich/preview` | Sugerencias online para campos vacíos |
+| `POST` | `/api/enrich/apply` | Aplicar campos confirmados |
 | `GET` | `/api/lookup/{isbn}` | Preview sin guardar |
 
 ### Ejemplo POST

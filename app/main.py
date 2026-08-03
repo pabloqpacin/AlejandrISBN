@@ -21,6 +21,7 @@ from app.db import (
     search_clause,
 )
 from app.db import runtime as db_runtime
+from app.routers import enrich as enrich_router
 from app.schemas import (
     BookCreate,
     BookOut,
@@ -69,11 +70,13 @@ app = FastAPI(
         {"name": "books", "description": "CRUD e inventario"},
         {"name": "lookup", "description": "Metadatos online por ISBN (sin guardar)"},
         {"name": "export", "description": "Descargas del inventario"},
-        {"name": "import", "description": "Importar inventario (JSON seed)"},
+        {"name": "import", "description": "Importar inventario (JSON/CSV, sin red)"},
+        {"name": "enrich", "description": "Completar campos vacíos vía catálogos online"},
         {"name": "ui", "description": "Frontend estático"},
     ],
 )
 
+app.include_router(enrich_router.router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -322,13 +325,14 @@ async def import_books(
         if not book.get("source") or book["source"] in {"seed", "seed-csv:lookup", "seed-csv:manual"}:
             book["source"] = "import"
 
-    inserted = await _insert_books(db, books)
+    inserted_isbns = await _insert_books(db, books)
     return {
         "ok": True,
         "format": "csv" if is_csv else "json",
         "parsed": len(books),
-        "inserted": inserted,
-        "skipped": len(books) - inserted,
+        "inserted": len(inserted_isbns),
+        "skipped": len(books) - len(inserted_isbns),
+        "inserted_isbns": inserted_isbns,
     }
 
 

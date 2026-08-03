@@ -231,155 +231,6 @@ def _books_from_import_csv(text: str) -> list[dict[str, Any]]:
     return cleaned
 
 
-def _csv_rows(path: Path) -> list[dict[str, str]]:
-    text = path.read_text(encoding="utf-8-sig")
-    reader = DictReader(StringIO(text))
-    if not reader.fieldnames:
-        raise ValueError(f"CSV seed {path.name} has no header row")
-    fields = {name.strip().lower(): name for name in reader.fieldnames if name}
-    if "isbn" not in fields and "title" not in fields:
-        raise ValueError(f"CSV seed {path.name} must include an 'isbn' and/or 'title' column")
-
-    rows: list[dict[str, str]] = []
-    for raw in reader:
-        normalized = {
-            key.strip().lower(): (raw.get(original) or "").strip()
-            for key, original in fields.items()
-        }
-        if not any(_optional_text(v) for v in normalized.values()):
-            continue
-        rows.append(normalized)
-    return rows
-
-
-def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, Any]:
-    """Build a book row from online lookup metadata + optional CSV overrides.
-
-    Lookup always wins for bibliographic fields (title, authors, year, publisher,
-    cover, description, source). CSV may still set library fields: location, notes,
-    genre, favourite, legal_deposit. Authors/genre are stored as ``;``-separated labels.
-    """
-    from app.schemas import normalize_authors, normalize_labels
-
-    book = {
-        "isbn": _normalize_isbn(row.get("isbn") or meta.get("isbn") or ""),
-        "title": meta.get("title") or "",
-        "authors": normalize_authors(meta.get("authors") or ""),
-        "publication_year": meta.get("publication_year"),
-        "genre": normalize_labels(meta.get("genre") or ""),
-        "publisher": meta.get("publisher") or "",
-        "cover_url": meta.get("cover_url") or "",
-        "description": meta.get("description") or "",
-        "location": "",
-        "notes": "",
-        "legal_deposit": "",
-        "collection": "",
-        "volume": "",
-        "original_year": None,
-        "translators": "",
-        "original_title": "",
-        "favourite": False,
-        "source": f"seed-csv:{meta.get('source') or 'lookup'}",
-        "created_at": None,
-        "updated_at": None,
-    }
-
-    for key in ("location", "notes"):
-        value = _optional_text(row.get(key))
-        if value:
-            book[key] = value
-
-    collection = _optional_text(row.get("collection") or row.get("coleccion"))
-    if collection:
-        book["collection"] = collection
-
-    volume = _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo"))
-    if volume:
-        book["volume"] = volume
-
-    translators = normalize_labels(row.get("translators") or row.get("traductores"))
-    if translators:
-        book["translators"] = translators
-
-    original_title = _optional_text(row.get("original_title") or row.get("titulo_original"))
-    if original_title:
-        book["original_title"] = original_title
-
-    year_orig = _optional_text(row.get("original_year") or row.get("año_original") or "")
-    if year_orig:
-        try:
-            book["original_year"] = int(year_orig)
-        except ValueError:
-            pass
-
-    genre_override = normalize_labels(row.get("genre"))
-    if genre_override:
-        book["genre"] = genre_override
-
-    book["legal_deposit"] = _legal_deposit_from_row(row)
-
-    if "favourite" in row and _optional_text(row.get("favourite")) != "":
-        book["favourite"] = _parse_bool(row["favourite"])
-
-    if _optional_text(row.get("source")):
-        book["source"] = _optional_text(row["source"])
-
-    if not book["title"] and _optional_text(row.get("title")):
-        book["title"] = _optional_text(row["title"])
-
-    return book
-
-
-def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
-    """Row without usable ISBN: insert as LOCAL item (title required)."""
-    from app.schemas import generate_local_id, normalize_authors, normalize_labels
-
-    title = _optional_text(row.get("title"))
-    if not title:
-        return None
-
-    authors = normalize_authors(row.get("authors") or row.get("autor") or "")
-    year_raw = _optional_text(row.get("publication_year") or row.get("year") or "")
-    year = None
-    if year_raw:
-        try:
-            year = int(year_raw)
-        except ValueError:
-            year = None
-
-    book = {
-        "isbn": generate_local_id(),
-        "title": title,
-        "authors": authors,
-        "publication_year": year,
-        "genre": normalize_labels(row.get("genre")),
-        "publisher": _optional_text(row.get("publisher")),
-        "cover_url": "",
-        "description": _optional_text(row.get("description")),
-        "location": _optional_text(row.get("location")),
-        "notes": _optional_text(row.get("notes")),
-        "legal_deposit": _legal_deposit_from_row(row),
-        "collection": _optional_text(row.get("collection") or row.get("coleccion")),
-        "volume": _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo")),
-        "original_year": None,
-        "translators": normalize_labels(row.get("translators") or row.get("traductores")),
-        "original_title": _optional_text(row.get("original_title") or row.get("titulo_original")),
-        "favourite": _parse_bool(row["favourite"])
-        if "favourite" in row and _optional_text(row.get("favourite")) != ""
-        else False,
-        "source": _optional_text(row.get("source")) or "seed-csv:manual",
-        "created_at": None,
-        "updated_at": None,
-    }
-    year_orig = _optional_text(row.get("original_year") or row.get("año_original") or "")
-    if year_orig:
-        try:
-            book["original_year"] = int(year_orig)
-        except ValueError:
-            pass
-    return book
-
-
 async def _ensure_seed_table(conn: DbConnection) -> None:
     await conn.execute(
         """
@@ -414,8 +265,9 @@ async def _mark_applied(conn: DbConnection, filename: str, checksum: str) -> Non
     )
 
 
-async def _insert_books(conn: DbConnection, books: list[dict[str, Any]]) -> int:
-    inserted = 0
+async def _insert_books(conn: DbConnection, books: list[dict[str, Any]]) -> list[str]:
+    """Insert books; return ISBNs that were newly inserted (conflicts skipped)."""
+    inserted_isbns: list[str] = []
     for book in books:
         result = await conn.execute(
             """
@@ -457,15 +309,20 @@ async def _insert_books(conn: DbConnection, books: list[dict[str, Any]]) -> int:
         )
         # asyncpg: "INSERT 0 1"; sqlite rowcount may be 1 or -1 depending on version
         if result.startswith("INSERT") and not result.rstrip().endswith(" 0"):
-            inserted += 1
-    return inserted
+            inserted_isbns.append(book["isbn"])
+    return inserted_isbns
 
 
 async def _apply_json(conn: DbConnection, path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     books = _books_from_json(payload)
-    count = await _insert_books(conn, books)
-    logger.info("Seed JSON %s: %s book(s) in file, %s inserted", path.name, len(books), count)
+    inserted = await _insert_books(conn, books)
+    logger.info(
+        "Seed JSON %s: %s book(s) in file, %s inserted",
+        path.name,
+        len(books),
+        len(inserted),
+    )
 
 
 async def _apply_sql(conn: DbConnection, path: Path) -> None:
@@ -477,70 +334,18 @@ async def _apply_sql(conn: DbConnection, path: Path) -> None:
 
 
 async def _apply_csv(conn: DbConnection, path: Path) -> None:
-    """ISBN rows → online lookup; rows without ISBN → manual insert (title + optional DL)."""
-    from app.services.isbn_lookup import lookup_isbn
-
-    rows = _csv_rows(path)
-    inserted = 0
-    skipped = 0
-    failed = 0
-
-    for row in rows:
-        raw_isbn = _optional_text(row.get("isbn"))
-        isbn = _normalize_isbn(raw_isbn) if raw_isbn else ""
-        has_isbn = bool(isbn) and len(isbn) in (10, 13)
-
-        if raw_isbn and not has_isbn:
-            logger.warning("Seed CSV %s: skipping invalid ISBN %r", path.name, row.get("isbn"))
-            failed += 1
-            continue
-
-        if not has_isbn:
-            book = _manual_book_from_csv(row)
-            if not book:
-                logger.warning(
-                    "Seed CSV %s: row without ISBN needs a title (got legal_deposit=%r)",
-                    path.name,
-                    row.get("legal_deposit") or row.get("deposito_legal"),
-                )
-                failed += 1
-                continue
-            count = await _insert_books(conn, [book])
-            inserted += count
-            continue
-
-        existing = await conn.fetchval("SELECT isbn FROM books WHERE isbn = $1", isbn)
-        if existing:
-            skipped += 1
-            continue
-
-        try:
-            meta = await lookup_isbn(isbn)
-        except ValueError as exc:
-            logger.warning("Seed CSV %s: lookup failed for %s (%s)", path.name, isbn, exc)
-            failed += 1
-            continue
-        except Exception:
-            logger.exception("Seed CSV %s: unexpected lookup error for %s", path.name, isbn)
-            failed += 1
-            continue
-
-        book = _override_from_csv(meta, {**row, "isbn": isbn})
-        if not book["title"]:
-            logger.warning("Seed CSV %s: no title after lookup for %s", path.name, isbn)
-            failed += 1
-            continue
-
-        count = await _insert_books(conn, [book])
-        inserted += count
-
+    """Offline CSV seed — same parser as UI import (no online lookup)."""
+    text = path.read_text(encoding="utf-8-sig")
+    books = _books_from_import_csv(text)
+    for book in books:
+        if not book.get("source") or book["source"] == "import":
+            book["source"] = "seed"
+    inserted = await _insert_books(conn, books)
     logger.info(
-        "Seed CSV %s: %s row(s), %s inserted, %s already present, %s failed",
+        "Seed CSV %s: parsed %s row(s), inserted %s (offline)",
         path.name,
-        len(rows),
-        inserted,
-        skipped,
-        failed,
+        len(books),
+        len(inserted),
     )
 
 
@@ -564,7 +369,7 @@ async def apply_seeds() -> None:
     Apply new/changed files from SEED_DIR.
 
     - *.json  → write book rows directly (ON CONFLICT DO NOTHING)
-    - *.csv   → online ISBN lookup per row, then insert (optional field overrides)
+    - *.csv   → same offline insert as UI import (no online lookup)
     - *.sql   → run SQL statements
 
     Tracked in schema_seeds by filename + checksum (re-apply if file changes).

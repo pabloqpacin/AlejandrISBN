@@ -9,6 +9,10 @@ const viewChips = document.getElementById("view-chips");
 const exportMenu = document.querySelector(".export-menu:not(.import-menu)");
 const importMenu = document.querySelector(".import-menu");
 const importFile = document.getElementById("import-file");
+const enrichBtn = document.getElementById("enrich-btn");
+const enrichDialog = document.getElementById("enrich-dialog");
+const enrichBody = document.getElementById("enrich-body");
+const enrichClose = document.getElementById("enrich-close");
 let importAccept = ".json,application/json";
 const bookTbody = document.getElementById("book-tbody");
 const listMeta = document.getElementById("list-meta");
@@ -1619,6 +1623,9 @@ async function importInventoryFile(file) {
       `Importado${fmt ? ` (${fmt})` : ""}: ${data.inserted} nuevos, ${data.skipped} ya existían (${data.parsed} en el archivo).`
     );
     await loadBooks();
+    if (data.inserted > 0) {
+      offerEnrichAfterImport(data.inserted_isbns || []);
+    }
   } catch {
     setStatus("Error de red al importar.", true);
   } finally {
@@ -1648,6 +1655,296 @@ importFile?.addEventListener("change", () => {
   if (file) importInventoryFile(file);
 });
 
+const ENRICH_FIELD_LABELS = {
+  title: "Título",
+  authors: "Autores",
+  publication_year: "Año",
+  genre: "Género",
+  publisher: "Editorial",
+  cover_url: "Portada",
+  description: "Descripción",
+  original_title: "Título original",
+  translators: "Traductores",
+  original_year: "Año original",
+};
+
+function setEnrichProgress({ current, total, label, found, failed }) {
+  if (!enrichBody) return;
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  enrichBody.innerHTML = `
+    <h3 class="enrich-title">Completar online</h3>
+    <p class="enrich-loading" id="enrich-progress-label">
+      ${escapeHtml(label || "Preparando…")}
+    </p>
+    <div class="enrich-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
+      <div class="enrich-progress-bar" style="width:${pct}%"></div>
+    </div>
+    <p class="enrich-progress-meta">
+      ${total ? `${current} / ${total}` : "…"}
+      ${typeof found === "number" ? ` · ${found} con sugerencias` : ""}
+      ${typeof failed === "number" && failed > 0 ? ` · ${failed} sin datos` : ""}
+    </p>`;
+}
+
+function truncateText(value, max = 120) {
+  const text = String(value ?? "");
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
+function offerEnrichAfterImport(isbns) {
+  if (!enrichDialog || !enrichBody) return;
+  const n = Array.isArray(isbns) ? isbns.length : 0;
+  enrichBody.innerHTML = `
+    <h3 class="enrich-title">Importación lista</h3>
+    <p class="enrich-meta">
+      Se añadieron ${n || "varios"} registro(s). ¿Buscar online datos faltantes
+      (autor, año, portada…) y revisar sugerencias antes de aplicarlas?
+    </p>
+    <div class="enrich-actions">
+      <button type="button" class="btn ghost" data-enrich-close>Ahora no</button>
+      <button type="button" class="btn primary" id="enrich-start-btn">Buscar online</button>
+    </div>`;
+  enrichDialog.showModal();
+  enrichBody.querySelector("[data-enrich-close]")?.addEventListener("click", () => enrichDialog.close());
+  enrichBody.querySelector("#enrich-start-btn")?.addEventListener("click", () => {
+    runEnrichPreview(isbns);
+  });
+}
+
+function renderEnrichResults(suggestions, scanned, failed) {
+  const actionable = (suggestions || []).filter((s) => (s.fields || []).length > 0);
+  if (!actionable.length) {
+    enrichBody.innerHTML = `
+      <h3 class="enrich-title">Completar online</h3>
+      <p>No hay sugerencias nuevas (revisados ${scanned || 0}; fallos ${failed || 0}).</p>
+      <div class="enrich-actions">
+        <button type="button" class="btn ghost" data-enrich-close>Cerrar</button>
+      </div>`;
+    setStatus("Sin sugerencias de enriquecimiento.");
+    enrichBody.querySelector("[data-enrich-close]")?.addEventListener("click", () => enrichDialog.close());
+    return;
+  }
+
+  enrichBody.innerHTML = `
+    <h3 class="enrich-title">Completar online</h3>
+    <p class="enrich-meta">
+      ${actionable.length} libro(s) con campos vacíos sugeridos
+      (revisados ${scanned}; fallos ${failed || 0}).
+      Desmarca lo que no quieras aplicar.
+    </p>
+    <div class="enrich-list" id="enrich-list"></div>
+    <div class="enrich-actions">
+      <button type="button" class="btn ghost" data-enrich-close>Cancelar</button>
+      <button type="button" class="btn primary" id="enrich-apply-btn">Aplicar seleccionados</button>
+    </div>`;
+
+  const list = enrichBody.querySelector("#enrich-list");
+  for (const item of actionable) {
+    const card = document.createElement("article");
+    card.className = "enrich-card";
+    card.dataset.isbn = item.isbn;
+    const fieldsHtml = item.fields
+      .map((field, idx) => {
+        const label = ENRICH_FIELD_LABELS[field.name] || field.name;
+        const cur = truncateText(field.current || "—");
+        const sug = truncateText(field.suggested);
+        return `
+          <label class="enrich-field">
+            <input type="checkbox" checked data-field="${escapeHtml(field.name)}" data-idx="${idx}" />
+            <span class="enrich-field-copy">
+              <strong>${escapeHtml(label)}</strong>
+              <span class="enrich-from">${escapeHtml(cur)}</span>
+              <span class="enrich-arrow">→</span>
+              <span class="enrich-to">${escapeHtml(sug)}</span>
+            </span>
+          </label>`;
+      })
+      .join("");
+    card.innerHTML = `
+      <header class="enrich-card-head">
+        <div>
+          <strong>${escapeHtml(truncateText(item.title || item.isbn, 80))}</strong>
+          <div class="enrich-isbn">${escapeHtml(item.isbn)}${item.lookup_source ? ` · ${escapeHtml(item.lookup_source)}` : ""}</div>
+        </div>
+        <label class="enrich-book-toggle">
+          <input type="checkbox" checked data-book-toggle />
+          Incluir
+        </label>
+      </header>
+      <div class="enrich-fields">${fieldsHtml}</div>`;
+    card._fieldMap = Object.fromEntries(item.fields.map((f) => [f.name, f.suggested]));
+    list.appendChild(card);
+
+    const bookToggle = card.querySelector("[data-book-toggle]");
+    bookToggle?.addEventListener("change", () => {
+      card.querySelectorAll("input[data-field]").forEach((cb) => {
+        cb.checked = bookToggle.checked;
+        cb.disabled = !bookToggle.checked;
+      });
+    });
+  }
+
+  enrichBody.querySelector("[data-enrich-close]")?.addEventListener("click", () => enrichDialog.close());
+  enrichBody.querySelector("#enrich-apply-btn")?.addEventListener("click", () => applyEnrichFromDialog());
+  setStatus(`Sugerencias listas: ${actionable.length} libro(s).`);
+}
+
+async function runEnrichPreview(isbns) {
+  if (!enrichDialog || !enrichBody) return;
+  enrichBtn && (enrichBtn.disabled = true);
+  setStatus("Consultando catálogos online…");
+  enrichDialog.showModal();
+  setEnrichProgress({ current: 0, total: 0, label: "Preparando lista de libros…", found: 0, failed: 0 });
+
+  try {
+    const limit = Array.isArray(isbns) && isbns.length
+      ? Math.min(100, Math.max(isbns.length, 1))
+      : 25;
+
+    let items = [];
+    if (Array.isArray(isbns) && isbns.length) {
+      items = isbns.map((isbn) => ({ isbn, title: "" }));
+    } else {
+      const candRes = await fetch("/api/enrich/candidates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fill_empty_only: true, limit }),
+      });
+      const candData = await candRes.json().catch(() => ({}));
+      if (!candRes.ok) {
+        const detail = candData.detail || "No se pudo preparar la búsqueda.";
+        enrichBody.innerHTML = `<p class="status error">${escapeHtml(detail)}</p>`;
+        setStatus(detail, true);
+        return;
+      }
+      items = candData.items || [];
+    }
+
+    if (!items.length) {
+      renderEnrichResults([], 0, 0);
+      return;
+    }
+
+    const suggestions = [];
+    let failed = 0;
+    let found = 0;
+    const total = items.length;
+
+    for (let i = 0; i < total; i += 1) {
+      const item = items[i];
+      const label = `Consultando catálogos… ${truncateText(item.title || item.isbn, 48)}`;
+      setEnrichProgress({
+        current: i,
+        total,
+        label,
+        found,
+        failed,
+      });
+      setStatus(`Completar online: ${i + 1}/${total}`);
+
+      const res = await fetch("/api/enrich/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isbns: [item.isbn],
+          fill_empty_only: true,
+          limit: 1,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        failed += 1;
+        suggestions.push({
+          isbn: item.isbn,
+          title: item.title || "",
+          lookup_source: "",
+          fields: [],
+          error: data.detail || "Error de consulta",
+        });
+      } else {
+        for (const suggestion of data.suggestions || []) {
+          suggestions.push(suggestion);
+          if (suggestion.error) failed += 1;
+          else if ((suggestion.fields || []).length) found += 1;
+        }
+      }
+
+      setEnrichProgress({
+        current: i + 1,
+        total,
+        label: `Listo: ${truncateText(item.title || item.isbn, 48)}`,
+        found,
+        failed,
+      });
+    }
+
+    renderEnrichResults(suggestions, total, failed);
+  } catch {
+    enrichBody.innerHTML = `<p class="status error">Error de red al consultar catálogos.</p>`;
+    setStatus("Error de red al completar online.", true);
+  } finally {
+    enrichBtn && (enrichBtn.disabled = false);
+  }
+}
+
+async function applyEnrichFromDialog() {
+  const list = enrichBody?.querySelector("#enrich-list");
+  if (!list) return;
+  const updates = [];
+  list.querySelectorAll(".enrich-card").forEach((card) => {
+    const isbn = card.dataset.isbn;
+    const bookOn = card.querySelector("[data-book-toggle]")?.checked;
+    if (!bookOn || !isbn) return;
+    const fields = {};
+    card.querySelectorAll("input[data-field]:checked").forEach((cb) => {
+      const name = cb.getAttribute("data-field");
+      if (name && card._fieldMap && name in card._fieldMap) {
+        fields[name] = card._fieldMap[name];
+      }
+    });
+    if (Object.keys(fields).length) updates.push({ isbn, fields });
+  });
+
+  if (!updates.length) {
+    setStatus("No hay campos seleccionados.", true);
+    return;
+  }
+
+  const applyBtn = enrichBody.querySelector("#enrich-apply-btn");
+  if (applyBtn) applyBtn.disabled = true;
+  setStatus(`Aplicando ${updates.length} actualización(es)…`);
+
+  try {
+    const res = await fetch("/api/enrich/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates, fill_empty_only: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setStatus(data.detail || "No se pudieron aplicar los cambios.", true);
+      return;
+    }
+    enrichDialog.close();
+    setStatus(
+      `Completado: ${data.updated} libro(s) actualizados` +
+        (data.skipped ? `, ${data.skipped} omitidos` : "") +
+        (data.errors?.length ? `, ${data.errors.length} error(es)` : "") +
+        ".",
+    );
+    await loadBooks();
+  } catch {
+    setStatus("Error de red al aplicar enriquecimiento.", true);
+  } finally {
+    if (applyBtn) applyBtn.disabled = false;
+  }
+}
+
+enrichBtn?.addEventListener("click", () => {
+  runEnrichPreview();
+});
+
 function closeOnBackdrop(dialog) {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
@@ -1656,8 +1953,10 @@ function closeOnBackdrop(dialog) {
 
 reviewClose.addEventListener("click", () => reviewDialog.close());
 detailClose.addEventListener("click", () => detailDialog.close());
+enrichClose?.addEventListener("click", () => enrichDialog?.close());
 closeOnBackdrop(reviewDialog);
 closeOnBackdrop(detailDialog);
+if (enrichDialog) closeOnBackdrop(enrichDialog);
 
 const themeToggle = document.getElementById("theme-toggle");
 const THEME_KEY = "alejandrisbn-theme";

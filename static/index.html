@@ -21,7 +21,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/styles.css?v=20260803d" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=20260803g" />
 </head>
 <body>
   <div class="atmosphere" aria-hidden="true"></div>
@@ -73,6 +73,9 @@
           />
         </label>
         <button type="button" id="clear-search" class="btn ghost compact hidden">Limpiar</button>
+        <button type="button" class="btn ghost compact" id="enrich-btn" title="Rellenar campos vacíos desde catálogos online">
+          Completar online
+        </button>
         <div class="export-menu import-menu">
           <button type="button" class="btn ghost compact export-trigger" aria-haspopup="true" aria-expanded="false">
             Importar
@@ -153,6 +156,13 @@
     <p id="empty-state" class="empty hidden">Aún no hay libros. Añade el primero con su ISBN.</p>
   </main>
 
+  <dialog id="enrich-dialog" class="detail-dialog enrich-dialog">
+    <div class="detail-sheet enrich-sheet">
+      <button type="button" class="detail-close" id="enrich-close" aria-label="Cerrar">×</button>
+      <div id="enrich-body"></div>
+    </div>
+  </dialog>
+
   <dialog id="review-dialog" class="detail-dialog">
     <div class="detail-sheet review-sheet">
       <button type="button" class="detail-close" id="review-close" aria-label="Cerrar">×</button>
@@ -167,6 +177,6 @@
     </div>
   </dialog>
 
-  <script src="/static/js/app.js?v=20260803d" type="module"></script>
+  <script src="/static/js/app.js?v=20260803g" type="module"></script>
 </body>
 </html>

@@ -18,11 +18,13 @@ services:
     restart: unless-stopped
 
   # App = API FastAPI + UI estática (mismo contenedor).
-  # Self-host: `docker compose up --build` (o start.bat en Windows).
-  # Imagen opcional en releases: ghcr.io/pabloqpacin/alejandrisbn:<tag>
+  # Dev/self-host: siempre `docker compose up --build -d` (o start.bat).
+  # `up -d` solo NO rebuild; reusa la imagen local ya tageada.
+  # Tag local a propósito (no ghcr.io/...:latest) para no pisar builds con un pull remoto.
+  # Publicación a GHCR: workflow release.yml, no este compose.
   alejandrisbn:
     build: .
-    image: ghcr.io/pabloqpacin/alejandrisbn:latest
+    image: alejandrisbn:local
     container_name: alejandrisbn
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-alejandrisbn}:${POSTGRES_PASSWORD:-alejandrisbn}@db:5432/${POSTGRES_DB:-alejandrisbn}
