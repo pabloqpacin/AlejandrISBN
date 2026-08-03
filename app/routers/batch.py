@@ -8,28 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import get_db
+from app.routers.common import ALLOWED_UPDATE_FIELDS
 from app.schemas import normalize_authors, normalize_book_key, normalize_labels
 
 router = APIRouter(prefix="/api/books/batch", tags=["batch"])
 
-ALLOWED_BATCH_FIELDS = {
-    "title",
-    "authors",
-    "publication_year",
-    "genre",
-    "publisher",
-    "cover_url",
-    "description",
-    "location",
-    "notes",
-    "legal_deposit",
-    "collection",
-    "volume",
-    "original_year",
-    "translators",
-    "original_title",
-    "favourite",
-}
+ALLOWED_BATCH_FIELDS = ALLOWED_UPDATE_FIELDS
 
 
 class BatchDeleteRequest(BaseModel):
