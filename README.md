@@ -14,9 +14,9 @@ Inventario lean de biblioteca: guarda libros por ISBN y completa título, autor,
 
 ### Windows (recomendado si no programas)
 
-1. Instala [Docker Desktop](https://www.docker.com/products/docker-desktop/) y [Git](https://git-scm.com/download/win)
-2. Clona el repo y entra en la carpeta
-3. Doble clic en `start.bat`
+1. Consigue la carpeta del repo (`git clone` o ZIP de GitHub)
+2. (PC nuevo) Doble clic en `setup-windows.bat` → instala Brave, Git y Docker Desktop; reinicia si Docker lo pide
+3. Abre Docker Desktop y, en la carpeta del proyecto, doble clic en `start.bat`
 
 Detalle paso a paso: **[docs/SELFHOSTING.md](docs/SELFHOSTING.md)**
 
