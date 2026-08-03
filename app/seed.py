@@ -8,7 +8,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Optional
 
-from app.database import DbConnection, pool
+from app.db import DbConnection, acquire
+from app.db import runtime as db_runtime
 
 logger = logging.getLogger("alejandrisbn.seed")
 
@@ -568,9 +569,9 @@ async def apply_seeds() -> None:
 
     Tracked in schema_seeds by filename + checksum (re-apply if file changes).
     """
-    from app.database import IS_SQLITE, PgConnection
+    from app.db import runtime as db_runtime
 
-    if pool is None:
+    if db_runtime.pool is None:
         raise RuntimeError("Database pool is not initialized")
 
     files = _seed_files()
@@ -578,8 +579,7 @@ async def apply_seeds() -> None:
         logger.info("No seed files found in %s", SEED_DIR)
         return
 
-    async with pool.acquire() as raw:
-        conn: DbConnection = raw if IS_SQLITE else PgConnection(raw)
+    async with acquire() as conn:
         await _ensure_seed_table(conn)
         for path in files:
             checksum = _checksum(path)
@@ -592,7 +592,7 @@ async def apply_seeds() -> None:
                     # Lookups are slow; do not wrap the whole file in one DB transaction.
                     await _apply_csv(conn, path)
                     await _mark_applied(conn, path.name, checksum)
-                elif IS_SQLITE:
+                elif db_runtime.IS_SQLITE:
                     # SQLite: apply without a long explicit transaction (simpler + reliable).
                     if suffix == ".json":
                         await _apply_json(conn, path)

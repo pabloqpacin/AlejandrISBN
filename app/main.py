@@ -11,8 +11,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from app.database import (
-    BACKEND,
+from app.db import (
     SEARCH_COLUMNS,
     close_pool,
     get_db,
@@ -21,6 +20,7 @@ from app.database import (
     record_to_dict,
     search_clause,
 )
+from app.db import runtime as db_runtime
 from app.schemas import (
     BookCreate,
     BookOut,
@@ -104,7 +104,7 @@ async def health(db=Depends(get_db)) -> dict:
     return {
         "status": "ok",
         "app": "AlejandrISBN",
-        "db": BACKEND,
+        "db": db_runtime.BACKEND,
         "version": get_version(),
     }
 
