@@ -488,6 +488,7 @@ function setActiveTab(tab, { skipLoad = false } = {}) {
   }
   updateHeroForTab();
   updatePrintColumns();
+  updateEnrichButtonVisibility();
   if (skipLoad) return;
   if (showOverview) {
     loadOverview();
@@ -579,6 +580,10 @@ function needsOnlineEnrichment(book) {
 
 function enrichSkipReason(book) {
   if (!book) return "No encontrado en el inventario";
+  const media = String(book.media_type || "book");
+  if (!PRINT_TYPES.has(media)) {
+    return "Completar online solo aplica a libros y revistas";
+  }
   if (!hasRealIsbn(book)) return "Sin ISBN — no se puede consultar online";
   if (fundamentalsComplete(book)) {
     return "Ya completo (título, autor, año, editorial + ISBN/DL)";
@@ -1161,6 +1166,7 @@ function updateBatchBar() {
     batchBar.hidden = n === 0;
     batchBar.classList.toggle("hidden", n === 0);
   }
+  updateEnrichButtonVisibility();
   if (selectAllVisible) {
     const visible = visibleBooks();
     const selectedVisible = visible.filter((book) => selectedIds.has(book.id)).length;
@@ -1168,6 +1174,19 @@ function updateBatchBar() {
     selectAllVisible.indeterminate =
       selectedVisible > 0 && selectedVisible < visible.length;
   }
+}
+
+function enrichAvailableForCurrentView() {
+  if (activeTab === "all") return true;
+  return PRINT_TYPES.has(currentMediaType() || "");
+}
+
+function updateEnrichButtonVisibility() {
+  const btn = document.getElementById("batch-enrich");
+  if (!btn) return;
+  const show = enrichAvailableForCurrentView();
+  btn.hidden = !show;
+  btn.classList.toggle("hidden", !show);
 }
 
 function setRowSelected(isbn, on) {
@@ -1290,6 +1309,10 @@ function openBatchFieldDialog() {
 }
 
 function batchEnrichSelected() {
+  if (!enrichAvailableForCurrentView()) {
+    setStatus("Completar online solo aplica a libros y revistas.", true);
+    return;
+  }
   const selectedIds = selectedList();
   if (!selectedIds.length) {
     setStatus("Selecciona al menos un ítem.", true);
@@ -2345,14 +2368,18 @@ function offerEnrichAfterImport(ids) {
   const realIds = (Array.isArray(ids) ? ids : []).filter(Boolean);
   if (!realIds.length) return;
 
+  const classified = classifyEnrichSelection(realIds);
+  // Solo libros/revistas con ISBN incompleto — no ofrecer para CDs/DVDs/etc.
+  if (!classified.toQuery.length) return;
+
   enrichBody.innerHTML = `
     <h3 class="enrich-title">Importación lista</h3>
     <p class="enrich-meta">
-      Se añadieron ${realIds.length} registro(s).
-      ¿Buscar online datos faltantes (autor, año, portada…) para los que tengan ISBN
-      y revisar sugerencias antes de aplicarlas?
-      Solo se proponen valores para <strong>campos vacíos</strong> (no corrige datos ya rellenados).
-      ${realIds.length > 20 ? " Puede tardar un rato." : ""}
+      Se añadieron ${realIds.length} registro(s)
+      (${classified.toQuery.length} libro(s)/revista(s) candidatos a completar online).
+      ¿Buscar datos faltantes (autor, año…) y revisar sugerencias antes de aplicarlas?
+      Solo se proponen valores para <strong>campos vacíos</strong>.
+      ${classified.toQuery.length > 20 ? " Puede tardar un rato." : ""}
     </p>
     <div class="enrich-actions">
       <button type="button" class="btn ghost" data-enrich-close>Ahora no</button>
@@ -2361,8 +2388,11 @@ function offerEnrichAfterImport(ids) {
   enrichDialog.showModal();
   enrichBody.querySelector("[data-enrich-close]")?.addEventListener("click", () => enrichDialog.close());
   enrichBody.querySelector("#enrich-start-btn")?.addEventListener("click", () => {
-    const { toQuery, toQueryItems, skipped, selected } = classifyEnrichSelection(realIds);
-    runEnrichPreview(toQuery, { selected, skipped, toQueryItems });
+    runEnrichPreview(classified.toQuery, {
+      selected: classified.selected,
+      skipped: classified.skipped,
+      toQueryItems: classified.toQueryItems,
+    });
   });
 }
 
