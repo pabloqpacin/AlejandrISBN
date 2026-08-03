@@ -25,16 +25,15 @@ AppSupportURL={#MyAppURL}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir=dist
+; Paths are relative to this .iss file (packaging/windows/), not the repo cwd.
+OutputDir=..\..\dist
 OutputBaseFilename=AlejandrISBN-Setup
-SetupIconFile=
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
-InfoBeforeFile=
 CloseApplications=force
 RestartApplications=no
 
@@ -47,7 +46,7 @@ Name: "desktopicon"; Description: "Crear icono en el Escritorio"; GroupDescripti
 
 [Files]
 ; Todo el bundle PyInstaller (exe + _internal + seed)
-Source: "dist\AlejandrISBN\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\dist\AlejandrISBN\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
