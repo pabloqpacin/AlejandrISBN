@@ -1,20 +1,25 @@
 # Instalar AlejandrISBN en tu PC (Windows)
 
-## La forma más fácil (sin Python ni Docker)
+## La forma más fácil (instalador)
 
-Para tu colega / PCs modestos: un **icono en el Escritorio**.
+1. Descarga **`AlejandrISBN-Setup.exe`** desde [Releases](https://github.com/pabloqpacin/AlejandrISBN/releases)
+2. Ejecútalo (no hace falta administrador)
+3. Se crea icono en el Escritorio / menú Inicio
+4. Puedes **borrar el Setup** descargado; la app queda en `%LOCALAPPDATA%\Programs\AlejandrISBN`
+5. Para salir: cierra la ventanita “AlejandrISBN”
+6. Para quitar la app: Ajustes → Aplicaciones → AlejandrISBN → Desinstalar  
+   (los libros en `%LOCALAPPDATA%\AlejandrISBN\` **no** se borran)
 
-1. Descarga **`AlejandrISBN-windows.zip`** desde [Releases](https://github.com/pabloqpacin/AlejandrISBN/releases) (o el artefacto del workflow *build-windows*)
-2. Extrae la carpeta donde quieras (p. ej. `Documents\AlejandrISBN`)
-3. Doble clic en **`AlejandrISBN.exe`**
-4. Se abre el navegador en [http://127.0.0.1:8000](http://127.0.0.1:8000)
-5. La **primera vez** se crea un acceso directo **AlejandrISBN** en el Escritorio
-6. Para salir: **cierra la ventanita** “AlejandrISBN” (no hace falta tocar `.bat`)
+**Restaurar un JSON:** en la carpeta de instalación hay `seed\` con `README.txt`. Copia ahí el JSON y reinicia la app.
 
-**Datos:** `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`  
-**Restaurar un JSON:** en el ZIP ya viene la carpeta `seed\` (con `README.txt`). Copia ahí el JSON y vuelve a abrir el `.exe`.
+No hace falta Python ni Docker. Inno Setup / el build son **gratis** (sin certificado de firma; Windows puede avisar “origen desconocido” la primera vez — *Más información → Ejecutar de todas formas*).
 
-No hace falta instalar Python ni Docker. El `.exe` lleva todo embebido (~4 GB RAM del PC bastan).
+---
+
+## Alternativa portable (ZIP)
+
+Si prefieres no instalar: descarga `AlejandrISBN-windows.zip`, extrae y abre `AlejandrISBN.exe`.  
+**No borres** la carpeta extraída (la app corre desde ahí).
 
 ---
 
@@ -22,7 +27,8 @@ No hace falta instalar Python ni Docker. El `.exe` lleva todo embebido (~4 GB RA
 
 | Modo | Para quién | Arranque |
 |------|------------|----------|
-| **ZIP + `.exe`** | Uso diario, no técnicos | `AlejandrISBN.exe` / icono Escritorio |
+| **Setup.exe** | Uso diario, no técnicos | Instalador → icono Escritorio |
+| **ZIP portable** | Sin instalar | `AlejandrISBN.exe` (no borrar carpeta) |
 | **Python + SQLite** | Desarrollo sin compilar | `start-desktop.bat` |
 | **Docker (Postgres)** | ≥8 GB RAM, contenedores | `start.bat` |
 

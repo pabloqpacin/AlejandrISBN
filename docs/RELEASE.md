@@ -37,15 +37,15 @@ En Actions debe aparecer **build-windows**; el Release incluirá `AlejandrISBN-w
 
 También puedes lanzar *build-windows* a mano (workflow_dispatch) y bajar el artifact sin tag.
 
-## Experiencia de usuario (exe)
+## Experiencia de usuario (instalador)
 
-1. Extrae el ZIP  
-2. Doble clic en `AlejandrISBN.exe`  
-3. Ventanita de control + navegador  
-4. Primera ejecución → acceso directo en Escritorio  
-5. Cerrar la ventanita = salir  
+1. Descarga `AlejandrISBN-Setup.exe` del Release  
+2. Next/Next/Finish (sin admin; instala en `%LOCALAPPDATA%\Programs\AlejandrISBN`)  
+3. Icono Escritorio / Inicio  
+4. Borra el Setup si quieres  
 
-Datos en `%LOCALAPPDATA%\AlejandrISBN\`. No instala Python en el sistema.
+CI: PyInstaller → Inno Setup (`packaging/windows/AlejandrISBN.iss`) → Setup + ZIP en el Release.  
+**Coste:** $0 (Inno Setup OSS + Actions). Firma Authenticode = opcional/pago.
 
 ## Checklist
 

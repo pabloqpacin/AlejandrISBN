@@ -14,11 +14,11 @@ Inventario lean de biblioteca: guarda libros por ISBN y completa título, autor,
 
 ### Windows — PCs modestos (sin Python ni Docker)
 
-1. Descarga `AlejandrISBN-windows.zip` desde [Releases](https://github.com/pabloqpacin/AlejandrISBN/releases)
-2. Extrae y abre **`AlejandrISBN.exe`** (se crea icono en el Escritorio)
+1. Descarga **`AlejandrISBN-Setup.exe`** desde [Releases](https://github.com/pabloqpacin/AlejandrISBN/releases)
+2. Instálalo → icono en Escritorio; puedes borrar el Setup
 3. Cierra la ventanita de la app para salir
 
-Detalle: **[docs/SELFHOSTING.md](docs/SELFHOSTING.md)**
+(También hay ZIP portable.) Detalle: **[docs/SELFHOSTING.md](docs/SELFHOSTING.md)**
 
 ### Windows — desarrollo con Python (SQLite)
 

@@ -1,4 +1,4 @@
-# Build Windows desktop .exe (no system Python for end users)
+# Build Windows desktop installer (PyInstaller + Inno Setup, free)
 
 name: build-windows
 
@@ -18,6 +18,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $v = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $v = "0.0.0+${{ github.run_number }}"
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "MyAppVersion=$v"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -35,35 +47,63 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/AlejandrISBN/seed | Out-Null
-          Copy-Item -Force packaging/windows-seed-README.txt dist/AlejandrISBN/seed/README.txt
+          if (Test-Path packaging/windows-seed-README.txt) {
+            Copy-Item -Force packaging/windows-seed-README.txt dist/AlejandrISBN/seed/README.txt
+          } else {
+            Set-Content -Path dist/AlejandrISBN/seed/README.txt -Value "Pon aqui un JSON exportado y reinicia AlejandrISBN.`n"
+          }
 
-      - name: Zip portable app
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile installer
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/AlejandrISBN/* -DestinationPath AlejandrISBN-windows.zip
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found" }
+          & $iscc /DMyAppVersion="${{ steps.ver.outputs.version }}" packaging\windows\AlejandrISBN.iss
+          if (-not (Test-Path dist\AlejandrISBN-Setup.exe)) { throw "Setup.exe missing" }
 
-      - name: Upload artifact
+      - name: Zip portable app (optional fallback)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/AlejandrISBN/* -DestinationPath AlejandrISBN-windows.zip -Force
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: AlejandrISBN-windows
-          path: AlejandrISBN-windows.zip
+          path: |
+            dist/AlejandrISBN-Setup.exe
+            AlejandrISBN-windows.zip
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: AlejandrISBN-windows.zip
+          files: |
+            dist/AlejandrISBN-Setup.exe
+            AlejandrISBN-windows.zip
           generate_release_notes: true
           body: |
-            ## Windows (sin Docker ni Python)
+            ## Windows — instalador (recomendado)
 
-            1. Descarga `AlejandrISBN-windows.zip`
-            2. Extrae la carpeta donde quieras
-            3. Doble clic en `AlejandrISBN.exe`
-            4. Se abre el navegador; se crea un icono en el Escritorio la primera vez
-            5. Cierra la ventanita de AlejandrISBN para salir
+            1. Descarga **`AlejandrISBN-Setup.exe`**
+            2. Ejecútalo (no hace falta ser administrador)
+            3. Se instala en `%LOCALAPPDATA%\Programs\AlejandrISBN`
+            4. Icono en Escritorio / menú Inicio
+            5. Puedes borrar el Setup descargado
 
-            Datos: `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`
+            Para salir: cierra la ventanita de AlejandrISBN.
 
-            Para cargar un JSON: ponlo en la carpeta `seed\` (junto al `.exe`) y reinicia.
+            **Datos** (no se borran al desinstalar): `%LOCALAPPDATA%\AlejandrISBN\`
+
+            **Importar JSON:** carpeta `seed\` dentro de la instalación (hay un README.txt).
+
+            También adjunto: `AlejandrISBN-windows.zip` (portable, sin instalador).
+
             Guía: `docs/SELFHOSTING.md`
