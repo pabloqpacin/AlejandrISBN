@@ -49,16 +49,6 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller alejandrisbn.spec
 
-      - name: Add seed folder + README next to the exe
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist/AlejandrISBN/seed | Out-Null
-          if (Test-Path packaging/windows-seed-README.txt) {
-            Copy-Item -Force packaging/windows-seed-README.txt dist/AlejandrISBN/seed/README.txt
-          } else {
-            Set-Content -Path dist/AlejandrISBN/seed/README.txt -Value "Pon aqui un JSON exportado y reinicia AlejandrISBN.`n"
-          }
-
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -74,29 +64,20 @@ jobs:
           & $iscc /DMyAppVersion="${{ steps.ver.outputs.version }}" packaging\windows\AlejandrISBN.iss
           if (-not (Test-Path dist\AlejandrISBN-Setup.exe)) { throw "Setup.exe missing" }
 
-      - name: Zip portable app (optional fallback)
-        shell: pwsh
-        run: |
-          Compress-Archive -Path dist/AlejandrISBN/* -DestinationPath AlejandrISBN-windows.zip -Force
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: AlejandrISBN-windows
-          path: |
-            dist/AlejandrISBN-Setup.exe
-            AlejandrISBN-windows.zip
+          path: dist/AlejandrISBN-Setup.exe
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/AlejandrISBN-Setup.exe
-            AlejandrISBN-windows.zip
+          files: dist/AlejandrISBN-Setup.exe
           generate_release_notes: true
           body: |
-            ## Windows — instalador (recomendado)
+            ## Windows — instalador
 
             1. Descarga **`AlejandrISBN-Setup.exe`**
             2. Ejecútalo (no hace falta ser administrador)
@@ -108,8 +89,6 @@ jobs:
 
             **Datos** (no se borran al desinstalar): `%LOCALAPPDATA%\AlejandrISBN\`
 
-            **Importar JSON:** carpeta `seed\` dentro de la instalación (hay un README.txt).
+            **Importar JSON/CSV:** con la app abierta, usa **Importar** (junto a Exportar).
 
-            También adjunto: `AlejandrISBN-windows.zip` (portable, sin instalador).
-
-            Guía: `docs/SELFHOSTING.md`
+            Self-host con Docker: clona el repo y `docker compose up --build -d` (ver `docs/SELFHOSTING.md`).

@@ -16,14 +16,6 @@ datas += collect_data_files("certifi")
 version_file = Path("VERSION")
 if version_file.is_file():
     datas.append((str(version_file), "."))
-readme = Path("packaging/windows-seed-README.txt")
-if readme.is_file():
-    datas.append((str(readme), "packaging"))
-seed_dir = Path("seed")
-if seed_dir.is_dir():
-    for path in seed_dir.iterdir():
-        if path.is_file() and (".example." in path.name or path.name == "README.md"):
-            datas.append((str(path), "seed"))
 
 a = Analysis(
     ["app/desktop_app.py"],
@@ -49,11 +41,45 @@ a = Analysis(
         "anyio._backends._asyncio",
         "aiosqlite",
         "certifi",
+        "app.paths",
         "app.main",
+        "app.db",
+        "app.db.config",
+        "app.db.common",
+        "app.db.runtime",
+        "app.db.schema",
+        "app.db.postgres",
+        "app.db.sqlite",
         "app.database",
-        "app.seed",
+        "app.importers",
+        "app.importers.books",
         "app.schemas",
         "app.services.isbn_lookup",
+        "app.services.isbn_lookup.util",
+        "app.services.isbn_lookup.merge",
+        "app.services.isbn_lookup.lookup",
+        "app.services.isbn_lookup.providers",
+        "app.services.isbn_lookup.providers.openlibrary",
+        "app.services.isbn_lookup.providers.google_books",
+        "app.services.isbn_lookup.providers.todos_tus_libros",
+        "app.services.isbn_lookup.providers.ibs",
+        "app.services.isbn_lookup.providers.isbnsearch",
+        "app.services.isbn_lookup.providers.abebooks",
+        "app.services.isbn_lookup.providers.goodreads",
+        "app.services.isbn_lookup.providers.buybook",
+        "app.services.isbn_lookup.providers.rbgalicia",
+        "app.services.isbn_lookup.providers.oszk",
+        "app.services.enrich",
+        "app.routers",
+        "app.routers.common",
+        "app.routers.ui",
+        "app.routers.health",
+        "app.routers.books",
+        "app.routers.lookup",
+        "app.routers.export",
+        "app.routers.import_books",
+        "app.routers.enrich",
+        "app.routers.batch",
         "app.version",
         "app.desktop_app",
     ],

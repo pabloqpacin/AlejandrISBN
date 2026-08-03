@@ -1,4 +1,33 @@
-# Instalar AlejandrISBN en tu PC (Windows)
+# Instalar AlejandrISBN
+
+Hay dos caminos principales:
+
+1. **Windows — instalador** (`AlejandrISBN-Setup.exe`): uso diario sin Docker ni Python. Incluye *Buscar actualizaciones* en la ventanita de la app.
+2. **Git + Docker** (Windows, macOS o Linux): clonas el repo y levantas el stack; mismo flujo en los tres sistemas.
+
+- [Instalar AlejandrISBN](#instalar-alejandrisbn)
+  - [La forma más fácil (instalador)](#la-forma-más-fácil-instalador)
+  - [Otras formas](#otras-formas)
+  - [Modo desarrollo — Python + SQLite (sin compilar el .exe)](#modo-desarrollo--python--sqlite-sin-compilar-el-exe)
+    - [Requisitos](#requisitos)
+    - [Pasos](#pasos)
+  - [Modo Docker (Postgres) — Windows, macOS y Linux](#modo-docker-postgres--windows-macos-y-linux)
+    - [Qué vas a instalar](#qué-vas-a-instalar)
+    - [Requisitos](#requisitos-1)
+    - [Opción rápida — PC nuevo (script de prerequisitos)](#opción-rápida--pc-nuevo-script-de-prerequisitos)
+    - [Paso 1 — Instalar Docker Desktop (manual)](#paso-1--instalar-docker-desktop-manual)
+    - [Paso 2 — Instalar Git (manual)](#paso-2--instalar-git-manual)
+    - [Paso 3 — Clonar el repositorio](#paso-3--clonar-el-repositorio)
+    - [Paso 4 — Arrancar con Docker](#paso-4--arrancar-con-docker)
+  - [Uso diario](#uso-diario)
+  - [Datos, contraseñas y copias de seguridad](#datos-contraseñas-y-copias-de-seguridad)
+    - [Guardar una copia (exportar)](#guardar-una-copia-exportar)
+    - [Restaurar desde un JSON](#restaurar-desde-un-json)
+  - [Actualizar a una versión nueva](#actualizar-a-una-versión-nueva)
+  - [Problemas frecuentes](#problemas-frecuentes)
+  - [Qué incluye el stack](#qué-incluye-el-stack)
+  - [Licencia y código](#licencia-y-código)
+
 
 ## La forma más fácil (instalador)
 
@@ -7,21 +36,13 @@
 3. Se crea icono en el Escritorio / menú Inicio
 4. Puedes **borrar el Setup** descargado; la app queda en `%LOCALAPPDATA%\Programs\AlejandrISBN`
 5. Para salir: cierra la ventanita “AlejandrISBN”
-6. **Actualizar:** en esa ventanita, *Buscar actualizaciones* (solo el `.exe` instalado; no aplica a Docker)
+6. **Actualizar:** en esa ventanita, *Buscar actualizaciones* descarga e instala el último `Setup.exe` del Release (solo el build Windows; no aplica a Docker)
 7. Para quitar la app: Ajustes → Aplicaciones → AlejandrISBN → Desinstalar  
    (los libros en `%LOCALAPPDATA%\AlejandrISBN\` **no** se borran)
 
-**Restaurar un JSON:** con la app abierta, usa **Importar** (junto a Exportar).  
-También puedes dejar el JSON en `seed\` y reiniciar (ver `README.txt` ahí).
+**Restaurar un JSON:** con la app abierta, usa **Importar** (junto a Exportar).
 
 No hace falta Python ni Docker. Inno Setup / el build son **gratis** (sin certificado de firma; Windows puede avisar “origen desconocido” la primera vez — *Más información → Ejecutar de todas formas*).
-
----
-
-## Alternativa portable (ZIP)
-
-Si prefieres no instalar: descarga `AlejandrISBN-windows.zip`, extrae y abre `AlejandrISBN.exe`.  
-**No borres** la carpeta extraída (la app corre desde ahí).
 
 ---
 
@@ -29,10 +50,8 @@ Si prefieres no instalar: descarga `AlejandrISBN-windows.zip`, extrae y abre `Al
 
 | Modo | Para quién | Arranque |
 |------|------------|----------|
-| **Setup.exe** | Uso diario, no técnicos | Instalador → icono Escritorio |
-| **ZIP portable** | Sin instalar | `AlejandrISBN.exe` (no borrar carpeta) |
-| **Python + SQLite** | Desarrollo sin compilar | `start-desktop.bat` |
-| **Docker (Postgres)** | ≥8 GB RAM, contenedores | `start.bat` |
+| **Setup.exe** | Windows, uso diario | Instalador → icono Escritorio; actualizaciones desde la ventanita de la app |
+| **Git + Docker** | Windows, macOS o Linux | `git clone` + `docker compose up --build -d` |
 
 Tus libros se quedan en tu PC. No se suben a ningún servidor externo (salvo consultas opcionales a Open Library / Google Books al buscar un ISBN).
 
@@ -55,13 +74,21 @@ Tus libros se quedan en tu PC. No se suben a ningún servidor externo (salvo con
 ### Pasos
 
 1. Consigue la carpeta del proyecto (`git clone` o ZIP de GitHub) en una ruta normal, p. ej. `Documents\AlejandrISBN`
-2. Doble clic en **`start-desktop.bat`**
-3. La primera vez crea `.venv`, instala dependencias y arranca la app (puede tardar unos minutos)
-4. Se abre [http://127.0.0.1:8000](http://127.0.0.1:8000) — **deja la ventana negra abierta** mientras uses la app
-5. Para parar: Ctrl+C en esa ventana, o `stop-desktop.bat`
+2. En PowerShell, desde esa carpeta:
+
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   $env:ALEJANDRISBN_BACKEND = "sqlite"
+   uvicorn app.main:app --host 127.0.0.1 --port 8000
+   ```
+
+3. Abre [http://127.0.0.1:8000](http://127.0.0.1:8000) — **deja la terminal abierta** mientras uses la app
+4. Para parar: Ctrl+C
 
 **Datos:** `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`  
-**Restaurar un JSON de backup:** copia el archivo a la carpeta `seed\` del proyecto y reinicia.
+**Restaurar un JSON de backup:** con la app abierta, usa **Importar** (junto a Exportar).
 
 Para probar la ventanita de control sin PyInstaller:
 
@@ -71,14 +98,16 @@ Para probar la ventanita de control sin PyInstaller:
 
 ---
 
-## Modo Docker (Postgres) — PCs con más recursos
+## Modo Docker (Postgres) — Windows, macOS y Linux
+
+Mismo enfoque en los tres sistemas: Git + Docker Desktop (o el motor Docker de tu distro en Linux).
 
 ### Qué vas a instalar
 
 1. **Brave** (recomendado) — navegador  
 2. **Docker Desktop** — app + Postgres en contenedores (~8 GB RAM de sistema)  
 3. **Git** — clonar / actualizar el repo  
-4. **AlejandrISBN** — `start.bat`
+4. **AlejandrISBN** — `docker compose up --build -d`
 
 ### Requisitos
 
@@ -91,17 +120,24 @@ Para probar la ventanita de control sin PyInstaller:
 | Virtualización en BIOS | VT-x / AMD-V |
 | Conexión a Internet | Primera instalación y búsquedas ISBN |
 
-### Opción rápida — PC nuevo (script Docker)
+### Opción rápida — PC nuevo (script de prerequisitos)
 
-> Estos scripts (`setup-windows.bat` / `.ps1`) **solo funcionan en Windows**. No se pueden ejecutar desde Linux ni desde una terminal WSL sobre la carpeta del repo.
+> El script `packaging/windows/setup-windows.bat` (y `.ps1`) **solo funciona en Windows**. No se puede ejecutar desde Linux ni desde una terminal WSL sobre la carpeta del repo.
 
 Si ya tienes la carpeta del proyecto (ZIP o USB):
 
 1. Copia/extrae a p. ej. `C:\Users\TU_USUARIO\Documents\AlejandrISBN` (evita `\\wsl$\...`)
-2. Doble clic en `setup-windows.bat` → acepta UAC
+2. Doble clic en `packaging\windows\setup-windows.bat` → acepta UAC
 3. Instala Brave, Git y Docker Desktop; reinicia si Docker lo pide
 4. Abre Docker Desktop y espera a que esté en marcha
-5. Doble clic en `start.bat`
+5. En PowerShell, desde la raíz del repo:
+
+   ```powershell
+   copy .env.example .env
+   docker compose up --build -d
+   ```
+
+6. Abre [http://localhost:8000](http://localhost:8000)
 
 **Si el `.bat` no hace nada:** clic derecho → *Ejecutar como administrador*. Si Windows bloquea el archivo: *Propiedades* → *Desbloquear*.
 
@@ -157,37 +193,18 @@ Si prefieres no usar Git: en GitHub pulsa **Code → Download ZIP**, descomprím
 
 ---
 
-## Paso 4 — Arrancar con Docker (opción fácil)
+### Paso 4 — Arrancar con Docker
 
-En el Explorador de archivos, entra en la carpeta `AlejandrISBN` y haz **doble clic** en:
-
-| Archivo | Qué hace |
-|---------|----------|
-| `start-desktop.bat` | **Sin Docker:** SQLite + Python (recomendado en PCs modestos) |
-| `stop-desktop.bat` | Intenta liberar el puerto 8000 del modo escritorio |
-| `setup-windows.bat` | (PC nuevo) Instala Brave, Git y Docker Desktop via `winget` |
-| `start.bat` | Docker: crea `.env` si no existe, construye e inicia el stack, abre el navegador |
-| `stop.bat` | Docker: para la aplicación (los libros **no** se borran) |
-| `update.bat` | Docker: descarga cambios del repo y vuelve a levantar el stack |
-
-La **primera** vez `start.bat` / `start-desktop.bat` puede tardar varios minutos. Las siguientes serán más rápidas.
-
-Cuando termine, abre: [http://localhost:8000](http://localhost:8000)
-
----
-
-## Paso 4 (alternativa) — Arrancar con PowerShell
-
-Desde la carpeta del proyecto:
+Desde la carpeta del proyecto (con Docker Desktop en marcha):
 
 ```powershell
 copy .env.example .env
 docker compose up --build -d
 ```
 
-Abre [http://localhost:8000](http://localhost:8000)
+La **primera** vez puede tardar varios minutos. Abre [http://localhost:8000](http://localhost:8000)
 
-Para detener:
+Para detener (los libros **no** se borran):
 
 ```powershell
 docker compose down
@@ -198,17 +215,17 @@ docker compose down
 ## Uso diario
 
 1. Abre **Docker Desktop** (debe estar en marcha)
-2. Ejecuta `start.bat` (o `docker compose up -d` si ya construiste antes)
+2. Desde la carpeta del repo: `docker compose up -d` (o `docker compose up --build -d` tras cambios)
 3. Entra en [http://localhost:8000](http://localhost:8000)
 
-Para parar sin perder datos: `stop.bat` o `docker compose down`.
+Para parar sin perder datos: `docker compose down`.
 
 ---
 
 ## Datos, contraseñas y copias de seguridad
 
 - Los datos viven en el volumen Docker `alejandrisbn_pgdata`.  
-  `stop.bat` / `docker compose down` **no** los borra.
+  `docker compose down` **no** los borra.
 - **No uses** `docker compose down -v` salvo que quieras **borrar toda la biblioteca**.
 - Opcional: edita el archivo `.env` y cambia `POSTGRES_PASSWORD` **antes del primer arranque**. Si ya arrancaste una vez, cambiar solo la contraseña en `.env` no actualiza la base ya creada.
 
@@ -227,30 +244,11 @@ El JSON es el formato ideal para **restaurar** después (cambio de PC, reinstala
 
 ### Restaurar desde un JSON
 
-La app lee automáticamente los archivos de la carpeta `seed/` al arrancar.
+1. Con la app en marcha, abre [http://localhost:8000](http://localhost:8000)
+2. Usa **Importar** (junto a Exportar) y elige tu archivo `.json` o `.csv`
+3. Comprueba que aparecen los libros
 
-1. Copia tu archivo exportado a la carpeta `seed` del proyecto, por ejemplo:
-
-   ```text
-   Documentos\AlejandrISBN\seed\mi-biblioteca.json
-   ```
-
-   (Cualquier nombre vale mientras termine en `.json`. No uses nombres que acaben en `.example.json`.)
-
-2. Reinicia solo la app para que cargue el archivo:
-
-   - Doble clic en `stop.bat`, luego en `start.bat`  
-   - O en PowerShell, desde la carpeta del proyecto:
-
-     ```powershell
-     docker compose restart alejandrisbn
-     ```
-
-3. Abre de nuevo [http://localhost:8000](http://localhost:8000) y comprueba que aparecen los libros.
-
-**Comportamiento:** el JSON **añade** libros que faltan; no pisa los que ya existen con el mismo ISBN (o el mismo id local). Si el mismo archivo ya se aplicó sin cambios, no se vuelve a importar; si editas el JSON o le cambias el nombre, sí se vuelve a procesar.
-
-**PC nuevo / base vacía:** clona el repo, pon el JSON en `seed/` **antes** (o justo después) del primer `start.bat`, y al arrancar se importará solo.
+**Comportamiento:** la importación **añade** libros que faltan; no pisa los que ya existen con el mismo ISBN (o el mismo id local).
 
 **Empezar de cero y cargar solo el JSON:** eso borra la base actual. Solo si lo tienes claro:
 
@@ -258,22 +256,18 @@ La app lee automáticamente los archivos de la carpeta `seed/` al arrancar.
 docker compose down -v
 ```
 
-Luego deja el JSON en `seed\` y ejecuta `start.bat`.
+Luego `docker compose up --build -d`, abre la UI e **Importar**.
 
 ---
 
 ## Actualizar a una versión nueva
 
-Con Git y el script:
+**Instalador Windows:** en la ventanita de control de AlejandrISBN, *Buscar actualizaciones*. Comprueba el último Release en GitHub, descarga el `Setup.exe` nuevo e instala (los datos en `%LOCALAPPDATA%\AlejandrISBN\` no se tocan).
 
-```text
-update.bat
-```
+**Git + Docker** (cualquier SO):
 
-O a mano:
-
-```powershell
-cd $env:USERPROFILE\Documents\AlejandrISBN
+```bash
+cd AlejandrISBN   # o la ruta donde clonaste
 git pull
 docker compose up --build -d
 ```

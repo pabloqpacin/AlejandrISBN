@@ -657,6 +657,55 @@ html[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
   text-align: center;
 }
 
+.col-select {
+  width: 2.2rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.col-select input {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--paper));
+}
+
+.batch-count {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.batch-field-form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.batch-sheet {
+  max-width: min(420px, calc(100vw - 2rem));
+}
+
+.inventory-table tbody tr:has(.row-select:checked) td {
+  background: color-mix(in srgb, var(--accent-soft) 35%, transparent);
+}
+
 .fav-btn {
   border: none;
   background: transparent;
@@ -999,6 +1048,119 @@ html[data-theme="dark"] .detail-dialog::backdrop {
 
 .review-sheet {
   max-width: min(720px, calc(100vw - 2rem));
+}
+
+.enrich-dialog .enrich-sheet {
+  max-width: min(720px, calc(100vw - 2rem));
+}
+
+.enrich-title {
+  margin: 0 0 0.35rem;
+  font-family: "Fraunces", serif;
+  font-size: 1.35rem;
+}
+
+.enrich-meta,
+.enrich-loading {
+  color: var(--ink-soft);
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+}
+
+.enrich-progress {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+  overflow: hidden;
+  margin: 0 0 0.55rem;
+}
+
+.enrich-progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent, #1f4a36);
+  transition: width 0.25s ease;
+}
+
+.enrich-progress-meta {
+  margin: 0 0 0.25rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.enrich-list {
+  display: grid;
+  gap: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.enrich-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  background: color-mix(in srgb, var(--paper) 92%, var(--accent-soft));
+}
+
+.enrich-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.65rem;
+}
+
+.enrich-isbn {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin-top: 0.15rem;
+}
+
+.enrich-book-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.enrich-fields {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.enrich-field {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.55rem;
+  align-items: start;
+  font-size: 0.88rem;
+}
+
+.enrich-field-copy {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.enrich-from {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+.enrich-arrow {
+  display: none;
+}
+
+.enrich-to {
+  color: var(--ink);
+}
+
+.enrich-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
 .detail-close {

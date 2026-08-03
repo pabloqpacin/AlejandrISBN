@@ -45,7 +45,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Crear icono en el Escritorio"; GroupDescription: "Accesos directos:"; Flags: checkedonce
 
 [Files]
-; Todo el bundle PyInstaller (exe + _internal + seed)
+; Todo el bundle PyInstaller (exe + _internal)
 Source: "..\..\dist\AlejandrISBN\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

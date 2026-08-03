@@ -1,17 +1,16 @@
 # Pipeline y release (borrador)
 #
 # Producto principal Windows (PCs modestos / no técnicos):
-#   ZIP con AlejandrISBN.exe (PyInstaller) → icono Escritorio, sin Python ni Docker
-# Alternativas:
-#   start-desktop.bat (dev con Python + SQLite)
-#   Docker Compose + Postgres (self-host)
+#   AlejandrISBN-Setup.exe (PyInstaller + Inno) → icono Escritorio, sin Python ni Docker
+# Alternativa:
+#   Docker Compose + Postgres (git clone / self-host)
 # Guía: `docs/SELFHOSTING.md`.
 
 ## Flujo propuesto
 
 ```text
 push / PR     →  CI Docker smoke
-tag vX.Y.Z    →  build-windows.yml → AlejandrISBN-Setup.exe (+ ZIP) en el Release
+tag vX.Y.Z    →  build-windows.yml → AlejandrISBN-Setup.exe en el Release
                 + release.yml → imagen GHCR (opcional)
 usuario final → Setup.exe → icono; luego “Buscar actualizaciones” en la ventanita
 ```
@@ -21,7 +20,7 @@ usuario final → Setup.exe → icono; luego “Buscar actualizaciones” en la 
 | Archivo | Disparador | Qué hace |
 |---------|------------|----------|
 | `.github/workflows/ci.yml` | push/PR | Build Docker + smoke `/api/health` |
-| `.github/workflows/build-windows.yml` | tag `v*` / manual | PyInstaller → Inno Setup → Setup.exe + ZIP |
+| `.github/workflows/build-windows.yml` | tag `v*` / manual | PyInstaller → Inno Setup → Setup.exe |
 | `.github/workflows/release.yml` | tag `v*` | Push GHCR + notas |
 
 ## Cómo publicar una versión para tu colega
@@ -33,7 +32,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-En Actions debe aparecer **build-windows**; el Release incluirá `AlejandrISBN-windows.zip`.
+En Actions debe aparecer **build-windows**; el Release incluirá `AlejandrISBN-Setup.exe`.
 
 También puedes lanzar *build-windows* a mano (workflow_dispatch) y bajar el artifact sin tag.
 
@@ -48,10 +47,10 @@ Comprueba el último Release en GitHub, descarga `AlejandrISBN-Setup.exe` e inst
 
 ## Checklist
 
-- [ ] Probar artifact `AlejandrISBN-windows.zip` en un Windows real
+- [ ] Probar `AlejandrISBN-Setup.exe` en un Windows real
 - [ ] SmartScreen: sin firma puede avisar la primera vez (certificado Authenticode = siguiente nivel)
 - [ ] Icono `.ico` custom (opcional)
-- [ ] Probar restore JSON vía carpeta `seed` junto al exe
+- [ ] Probar restore JSON vía **Importar** en la UI
 
 ## Fuera de alcance aún
 

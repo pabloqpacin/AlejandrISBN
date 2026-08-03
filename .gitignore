@@ -9,8 +9,3 @@ __pycache__/
 data/
 build/
 dist/
-seed/*
-!seed/README.md
-!seed/*.example.json
-!seed/*.example.sql
-!seed/*.example.csv
