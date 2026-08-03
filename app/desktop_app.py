@@ -258,6 +258,18 @@ def _is_windows_desktop_build() -> bool:
     return os.name == "nt" and bool(getattr(sys, "frozen", False))
 
 
+def _ssl_context():
+    """CA bundle that works inside the frozen Windows .exe (system store often missing)."""
+    import ssl
+
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 def _fetch_latest_release() -> dict:
     import json
     from urllib.error import HTTPError, URLError
@@ -275,7 +287,7 @@ def _fetch_latest_release() -> dict:
         },
     )
     try:
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=30, context=_ssl_context()) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except HTTPError as exc:
         raise RuntimeError(f"GitHub API HTTP {exc.code}") from exc
@@ -306,7 +318,7 @@ def _download_file(url: str, dest: Path) -> None:
     from urllib.request import Request, urlopen
 
     req = Request(url, headers={"User-Agent": "AlejandrISBN-Updater"})
-    with urlopen(req, timeout=120) as resp, dest.open("wb") as out:
+    with urlopen(req, timeout=120, context=_ssl_context()) as resp, dest.open("wb") as out:
         while True:
             chunk = resp.read(1024 * 256)
             if not chunk:

@@ -7,9 +7,12 @@
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
 
 datas = [("static", "static")]
+datas += collect_data_files("certifi")
 version_file = Path("VERSION")
 if version_file.is_file():
     datas.append((str(version_file), "."))
@@ -45,6 +48,7 @@ a = Analysis(
         "anyio",
         "anyio._backends._asyncio",
         "aiosqlite",
+        "certifi",
         "app.main",
         "app.database",
         "app.seed",
