@@ -270,60 +270,65 @@ def _ssl_context():
         return ssl.create_default_context()
 
 
-def _fetch_latest_release() -> dict:
-    import json
+_SETUP_ASSET = "AlejandrISBN-Setup.exe"
+_UA = "AlejandrISBN-Updater"
+
+
+def _fetch_latest_tag() -> str:
+    """Resolve latest release tag via github.com redirect (no REST API / rate limit)."""
     from urllib.error import HTTPError, URLError
+    from urllib.parse import unquote, urlparse
     from urllib.request import Request, urlopen
 
     from app.version import get_github_repo
 
     repo = get_github_repo()
-    url = f"https://api.github.com/repos/{repo}/releases/latest"
-    req = Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "AlejandrISBN-Updater",
-        },
-    )
+    url = f"https://github.com/{repo}/releases/latest"
+    req = Request(url, headers={"User-Agent": _UA, "Accept": "text/html"})
     try:
         with urlopen(req, timeout=30, context=_ssl_context()) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            final = resp.geturl()
     except HTTPError as exc:
-        raise RuntimeError(f"GitHub API HTTP {exc.code}") from exc
+        raise RuntimeError(f"GitHub HTTP {exc.code}") from exc
     except URLError as exc:
         raise RuntimeError(f"Sin red / GitHub: {exc.reason}") from exc
 
+    path = unquote(urlparse(final).path)
+    marker = "/releases/tag/"
+    if marker not in path:
+        raise RuntimeError(f"No se pudo leer el tag del release ({final})")
+    tag = path.split(marker, 1)[1].strip("/")
+    if not tag:
+        raise RuntimeError("Release sin tag")
+    return tag
 
-def _find_setup_asset(release: dict) -> tuple[str, str]:
-    for asset in release.get("assets") or []:
-        name = asset.get("name") or ""
-        if name.lower() == "alejandrisbn-setup.exe":
-            url = asset.get("browser_download_url")
-            if url:
-                return url, name
-    for asset in release.get("assets") or []:
-        name = (asset.get("name") or "").lower()
-        if name.endswith("setup.exe"):
-            url = asset.get("browser_download_url")
-            if url:
-                return url, asset.get("name") or "AlejandrISBN-Setup.exe"
-    raise RuntimeError(
-        "El release no incluye AlejandrISBN-Setup.exe.\n"
-        "Publica un tag para que build-windows lo adjunte."
-    )
+
+def _setup_download_url(tag: str) -> str:
+    from app.version import get_github_repo
+
+    repo = get_github_repo()
+    return f"https://github.com/{repo}/releases/download/{tag}/{_SETUP_ASSET}"
 
 
 def _download_file(url: str, dest: Path) -> None:
+    from urllib.error import HTTPError
     from urllib.request import Request, urlopen
 
-    req = Request(url, headers={"User-Agent": "AlejandrISBN-Updater"})
-    with urlopen(req, timeout=120, context=_ssl_context()) as resp, dest.open("wb") as out:
-        while True:
-            chunk = resp.read(1024 * 256)
-            if not chunk:
-                break
-            out.write(chunk)
+    req = Request(url, headers={"User-Agent": _UA})
+    try:
+        with urlopen(req, timeout=120, context=_ssl_context()) as resp, dest.open("wb") as out:
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                out.write(chunk)
+    except HTTPError as exc:
+        if exc.code == 404:
+            raise RuntimeError(
+                f"El release no incluye {_SETUP_ASSET}.\n"
+                "Publica un tag para que build-windows lo adjunte."
+            ) from exc
+        raise RuntimeError(f"Descarga HTTP {exc.code}") from exc
 
 
 def _write_and_launch_updater(setup_path: Path) -> None:
@@ -413,10 +418,8 @@ def _show_window(on_close) -> None:
 
         def work() -> None:
             try:
-                release = _fetch_latest_release()
-                remote = normalize_version(release.get("tag_name") or release.get("name") or "")
-                if not remote:
-                    raise RuntimeError("Release sin tag")
+                tag = _fetch_latest_tag()
+                remote = normalize_version(tag)
                 local = normalize_version(get_version())
                 if not is_newer(remote, local):
 
@@ -431,7 +434,7 @@ def _show_window(on_close) -> None:
                     root.after(0, up_to_date)
                     return
 
-                url, asset_name = _find_setup_asset(release)
+                url = _setup_download_url(tag)
 
                 def ask() -> None:
                     ok = messagebox.askyesno(
@@ -445,11 +448,11 @@ def _show_window(on_close) -> None:
                         status.configure(text="")
                         btn.configure(state="normal")
                         return
-                    status.configure(text=f"Descargando {asset_name}…")
+                    status.configure(text=f"Descargando {_SETUP_ASSET}…")
 
                     def download_and_apply() -> None:
                         try:
-                            dest = _data_dir() / asset_name
+                            dest = _data_dir() / _SETUP_ASSET
                             _download_file(url, dest)
                             _log(f"downloaded update to {dest}")
                             _write_and_launch_updater(dest)
