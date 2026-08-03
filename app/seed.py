@@ -83,7 +83,7 @@ def _legal_deposit_from_row(row: dict[str, Any]) -> str:
 
 
 def _books_from_json(payload: Any) -> list[dict[str, Any]]:
-    from app.schemas import generate_local_id, is_local_id, normalize_labels
+    from app.schemas import generate_local_id, is_local_id, normalize_authors, normalize_labels
 
     if isinstance(payload, dict):
         if isinstance(payload.get("books"), list):
@@ -118,7 +118,7 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
             {
                 "isbn": isbn,
                 "title": title,
-                "authors": normalize_labels(row.get("authors")),
+                "authors": normalize_authors(row.get("authors")),
                 "publication_year": row.get("publication_year"),
                 "genre": normalize_labels(row.get("genre")),
                 "publisher": _optional_text(row.get("publisher")),
@@ -129,6 +129,11 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
                 "legal_deposit": _legal_deposit_from_row(row),
                 "collection": _optional_text(row.get("collection") or row.get("coleccion")),
                 "volume": _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo")),
+                "original_year": row.get("original_year"),
+                "translators": normalize_labels(row.get("translators") or row.get("traductores")),
+                "original_title": _optional_text(
+                    row.get("original_title") or row.get("titulo_original")
+                ),
                 "favourite": bool(row.get("favourite", False)),
                 "source": _optional_text(row.get("source")) or "seed",
                 "created_at": _parse_ts(row.get("created_at")),
@@ -166,12 +171,12 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
     cover, description, source). CSV may still set library fields: location, notes,
     genre, favourite, legal_deposit. Authors/genre are stored as ``;``-separated labels.
     """
-    from app.schemas import normalize_labels
+    from app.schemas import normalize_authors, normalize_labels
 
     book = {
         "isbn": _normalize_isbn(row.get("isbn") or meta.get("isbn") or ""),
         "title": meta.get("title") or "",
-        "authors": normalize_labels(meta.get("authors") or ""),
+        "authors": normalize_authors(meta.get("authors") or ""),
         "publication_year": meta.get("publication_year"),
         "genre": normalize_labels(meta.get("genre") or ""),
         "publisher": meta.get("publisher") or "",
@@ -182,6 +187,9 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
         "legal_deposit": "",
         "collection": "",
         "volume": "",
+        "original_year": None,
+        "translators": "",
+        "original_title": "",
         "favourite": False,
         "source": f"seed-csv:{meta.get('source') or 'lookup'}",
         "created_at": None,
@@ -200,6 +208,21 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
     volume = _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo"))
     if volume:
         book["volume"] = volume
+
+    translators = normalize_labels(row.get("translators") or row.get("traductores"))
+    if translators:
+        book["translators"] = translators
+
+    original_title = _optional_text(row.get("original_title") or row.get("titulo_original"))
+    if original_title:
+        book["original_title"] = original_title
+
+    year_orig = _optional_text(row.get("original_year") or row.get("año_original") or "")
+    if year_orig:
+        try:
+            book["original_year"] = int(year_orig)
+        except ValueError:
+            pass
 
     genre_override = normalize_labels(row.get("genre"))
     if genre_override:
@@ -221,13 +244,13 @@ def _override_from_csv(meta: dict[str, Any], row: dict[str, str]) -> dict[str, A
 
 def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
     """Row without usable ISBN: insert as LOCAL item (title required)."""
-    from app.schemas import generate_local_id, normalize_labels
+    from app.schemas import generate_local_id, normalize_authors, normalize_labels
 
     title = _optional_text(row.get("title"))
     if not title:
         return None
 
-    authors = normalize_labels(row.get("authors") or row.get("autor") or "")
+    authors = normalize_authors(row.get("authors") or row.get("autor") or "")
     year_raw = _optional_text(row.get("publication_year") or row.get("year") or "")
     year = None
     if year_raw:
@@ -236,7 +259,7 @@ def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
         except ValueError:
             year = None
 
-    return {
+    book = {
         "isbn": generate_local_id(),
         "title": title,
         "authors": authors,
@@ -250,6 +273,9 @@ def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
         "legal_deposit": _legal_deposit_from_row(row),
         "collection": _optional_text(row.get("collection") or row.get("coleccion")),
         "volume": _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo")),
+        "original_year": None,
+        "translators": normalize_labels(row.get("translators") or row.get("traductores")),
+        "original_title": _optional_text(row.get("original_title") or row.get("titulo_original")),
         "favourite": _parse_bool(row["favourite"])
         if "favourite" in row and _optional_text(row.get("favourite")) != ""
         else False,
@@ -257,6 +283,13 @@ def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
         "created_at": None,
         "updated_at": None,
     }
+    year_orig = _optional_text(row.get("original_year") or row.get("año_original") or "")
+    if year_orig:
+        try:
+            book["original_year"] = int(year_orig)
+        except ValueError:
+            pass
+    return book
 
 
 async def _ensure_seed_table(conn: asyncpg.Connection) -> None:
@@ -301,13 +334,15 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             INSERT INTO books (
                 isbn, title, authors, publication_year, genre, publisher,
                 cover_url, description, location, notes, legal_deposit, collection, volume,
+                original_year, translators, original_title,
                 favourite, source, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10, $11, $12, $13,
-                $14, $15,
-                COALESCE($16, NOW()),
-                COALESCE($17, NOW())
+                $14, $15, $16,
+                $17, $18,
+                COALESCE($19, NOW()),
+                COALESCE($20, NOW())
             )
             ON CONFLICT (isbn) DO NOTHING
             """,
@@ -324,6 +359,9 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             book.get("legal_deposit") or "",
             book.get("collection") or "",
             book.get("volume") or "",
+            book.get("original_year"),
+            book.get("translators") or "",
+            book.get("original_title") or "",
             book["favourite"],
             book["source"],
             book["created_at"],

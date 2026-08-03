@@ -102,6 +102,24 @@ async def init_db() -> None:
             )
             await conn.execute(
                 """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS original_year INTEGER
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS translators TEXT NOT NULL DEFAULT ''
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS original_title TEXT NOT NULL DEFAULT ''
+                """
+            )
+            await conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_books_title
                 ON books (lower(title))
                 """
