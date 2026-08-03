@@ -22,6 +22,8 @@ EXPORT_FIELDS = [
     "publication_year",
     "genre",
     "publisher",
+    "room",
+    "furniture",
     "location",
     "notes",
     "legal_deposit",
@@ -40,6 +42,11 @@ EXPORT_FIELDS = [
 
 
 def _row_to_export(row: dict) -> dict:
+    from app.schemas import format_placement
+
+    room = row.get("room") or ""
+    furniture = row.get("furniture") or ""
+    location = format_placement(room, furniture, row.get("location") or "")
     return {
         "id": row.get("id") or "",
         "media_type": row.get("media_type") or "book",
@@ -51,7 +58,9 @@ def _row_to_export(row: dict) -> dict:
         "publisher": row.get("publisher") or "",
         "cover_url": row.get("cover_url") or "",
         "description": row.get("description") or "",
-        "location": row.get("location") or "",
+        "room": room,
+        "furniture": furniture,
+        "location": location,
         "notes": row.get("notes") or "",
         "legal_deposit": row.get("legal_deposit") or "",
         "collection": row.get("collection") or "",

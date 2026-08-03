@@ -24,6 +24,8 @@ SEARCH_COLUMNS = [
     "genre",
     "publisher",
     "location",
+    "room",
+    "furniture",
     "notes",
     "legal_deposit",
     "collection",

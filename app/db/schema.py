@@ -57,14 +57,14 @@ async def _migrate_books_to_items(conn: Any, *, is_sqlite: bool) -> None:
             """
             INSERT INTO items (
                 id, media_type, isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, legal_deposit, collection, volume,
-                original_year, translators, original_title, favourite, source,
+                cover_url, description, location, room, furniture, notes, legal_deposit,
+                collection, volume, original_year, translators, original_title, favourite, source,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8,
                 $9, $10, $11, $12, $13, $14, $15,
-                $16, $17, $18, $19, $20,
-                COALESCE($21, NOW()), COALESCE($22, NOW())
+                $16, $17, $18, $19, $20, $21, $22,
+                COALESCE($23, NOW()), COALESCE($24, NOW())
             )
             """,
             item_id,
@@ -78,6 +78,8 @@ async def _migrate_books_to_items(conn: Any, *, is_sqlite: bool) -> None:
             data.get("cover_url") or "",
             data.get("description") or "",
             data.get("location") or "",
+            data.get("location") or "",  # room backfill
+            "",
             data.get("notes") or "",
             data.get("legal_deposit") or "",
             data.get("collection") or "",
@@ -116,6 +118,8 @@ async def ensure_items_schema(conn: Any, *, is_sqlite: bool) -> None:
             cover_url        TEXT NOT NULL DEFAULT '',
             description      TEXT NOT NULL DEFAULT '',
             location         TEXT NOT NULL DEFAULT '',
+            room             TEXT NOT NULL DEFAULT '',
+            furniture        TEXT NOT NULL DEFAULT '',
             notes            TEXT NOT NULL DEFAULT '',
             source           TEXT NOT NULL DEFAULT '',
             favourite        BOOLEAN NOT NULL DEFAULT FALSE,
@@ -135,6 +139,8 @@ async def ensure_items_schema(conn: Any, *, is_sqlite: bool) -> None:
         ("media_type", "TEXT NOT NULL DEFAULT 'book'"),
         ("isbn", "TEXT"),
         ("location", "TEXT NOT NULL DEFAULT ''"),
+        ("room", "TEXT NOT NULL DEFAULT ''"),
+        ("furniture", "TEXT NOT NULL DEFAULT ''"),
         ("favourite", "BOOLEAN NOT NULL DEFAULT FALSE"),
         ("legal_deposit", "TEXT NOT NULL DEFAULT ''"),
         ("collection", "TEXT NOT NULL DEFAULT ''"),
@@ -154,6 +160,8 @@ async def ensure_items_schema(conn: Any, *, is_sqlite: bool) -> None:
         "CREATE INDEX IF NOT EXISTS idx_items_authors ON items (lower(authors))",
         "CREATE INDEX IF NOT EXISTS idx_items_media_type ON items (media_type)",
         "CREATE INDEX IF NOT EXISTS idx_items_location ON items (lower(location))",
+        "CREATE INDEX IF NOT EXISTS idx_items_room ON items (lower(room))",
+        "CREATE INDEX IF NOT EXISTS idx_items_furniture ON items (lower(furniture))",
         "CREATE INDEX IF NOT EXISTS idx_items_favourite ON items (favourite)",
         "CREATE INDEX IF NOT EXISTS idx_items_legal_deposit ON items (lower(legal_deposit))",
         "CREATE INDEX IF NOT EXISTS idx_items_collection ON items (lower(collection))",
@@ -163,6 +171,19 @@ async def ensure_items_schema(conn: Any, *, is_sqlite: bool) -> None:
         await conn.execute(stmt)
 
     await _migrate_books_to_items(conn, is_sqlite=is_sqlite)
+    await _backfill_room_from_location(conn)
+
+
+async def _backfill_room_from_location(conn: Any) -> None:
+    """One-shot: copy legacy location into room when room is still empty."""
+    await conn.execute(
+        """
+        UPDATE items
+        SET room = TRIM(location)
+        WHERE TRIM(COALESCE(room, '')) = ''
+          AND TRIM(COALESCE(location, '')) <> ''
+        """
+    )
 
 
 async def _ensure_legacy_books_columns(conn: Any, *, is_sqlite: bool) -> None:

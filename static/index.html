@@ -21,7 +21,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/styles.css?v=20260803k" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=20260803m" />
 </head>
 <body>
   <div class="atmosphere" aria-hidden="true"></div>
@@ -82,7 +82,7 @@
       </div>
       <div class="overview-block">
         <h3>Por ubicación</h3>
-        <ul id="overview-by-location" class="overview-list"></ul>
+        <ul id="overview-by-room" class="overview-list"></ul>
       </div>
     </div>
   </section>
@@ -167,10 +167,16 @@
                 <button type="button" class="group-toggle" data-group="genre" title="Añadir/quitar agrupación por género" aria-pressed="false">▦</button>
               </div>
             </th>
-            <th scope="col" class="col-location">
+            <th scope="col" class="col-room">
               <div class="th-cell">
-                <button type="button" class="sort-btn" data-sort="location">Ubicación</button>
-                <button type="button" class="group-toggle" data-group="location" title="Añadir/quitar agrupación por ubicación" aria-pressed="false">▦</button>
+                <button type="button" class="sort-btn" data-sort="room">Habitación</button>
+                <button type="button" class="group-toggle" data-group="room" title="Añadir/quitar agrupación por habitación" aria-pressed="false">▦</button>
+              </div>
+            </th>
+            <th scope="col" class="col-furniture">
+              <div class="th-cell">
+                <button type="button" class="sort-btn" data-sort="furniture">Mueble</button>
+                <button type="button" class="group-toggle" data-group="furniture" title="Añadir/quitar agrupación por mueble" aria-pressed="false">▦</button>
               </div>
             </th>
             <th scope="col">
@@ -224,6 +230,6 @@
     </div>
   </dialog>
 
-  <script src="/static/js/app.js?v=20260803k" type="module"></script>
+  <script src="/static/js/app.js?v=20260803m" type="module"></script>
 </body>
 </html>

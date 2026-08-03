@@ -15,9 +15,12 @@ from app.schemas import (
     ItemOut,
     ItemUpdate,
     MediaType,
+    RoomStat,
+    FurnitureStat,
     StatsOut,
     generate_item_id,
     is_print_media,
+    resolve_placement,
 )
 from app.services.isbn_lookup import lookup_isbn
 
@@ -41,22 +44,54 @@ async def inventory_stats(db=Depends(get_db)) -> StatsOut:
     for media in MediaType:
         by_media_type.setdefault(media.value, 0)
 
-    location_rows = await db.fetch(
+    room_rows = await db.fetch(
         """
         SELECT
-            CASE WHEN TRIM(COALESCE(location, '')) = '' THEN '(sin ubicación)'
-                 ELSE TRIM(location)
-            END AS value,
+            CASE WHEN TRIM(COALESCE(room, '')) = '' THEN '(sin habitación)'
+                 ELSE TRIM(room)
+            END AS room,
+            CASE WHEN TRIM(COALESCE(furniture, '')) = '' THEN '(sin mueble)'
+                 ELSE TRIM(furniture)
+            END AS furniture,
             COUNT(*)::int AS count
         FROM items
-        GROUP BY 1
-        ORDER BY count DESC, value ASC
+        GROUP BY 1, 2
+        ORDER BY 1 ASC, count DESC, 2 ASC
         """
     )
+    rooms: dict[str, RoomStat] = {}
+    for row in room_rows:
+        room_name = str(row["room"])
+        count = int(row["count"])
+        if room_name not in rooms:
+            rooms[room_name] = RoomStat(value=room_name, count=0, furniture=[])
+        rooms[room_name].count += count
+        rooms[room_name].furniture.append(
+            FurnitureStat(value=str(row["furniture"]), count=count)
+        )
+    by_room = sorted(rooms.values(), key=lambda item: (-item.count, item.value))
+
+    # Legacy flat list (composed placement) for older clients.
     by_location = [
-        {"value": str(row["value"]), "count": int(row["count"])} for row in location_rows
+        {
+            "value": room.value
+            if not room.furniture
+            else (
+                room.value
+                if len(room.furniture) == 1 and room.furniture[0].value == "(sin mueble)"
+                else room.value
+            ),
+            "count": room.count,
+        }
+        for room in by_room
     ]
-    return StatsOut(total=total, by_media_type=by_media_type, by_location=by_location)
+
+    return StatsOut(
+        total=total,
+        by_media_type=by_media_type,
+        by_room=by_room,
+        by_location=by_location,
+    )
 
 
 @router.get("/api/items", response_model=list[ItemOut])
@@ -148,6 +183,8 @@ async def field_suggestions(db=Depends(get_db)) -> dict:
     return {
         "authors": await label_values_for("authors"),
         "genre": await label_values_for("genre"),
+        "room": await values_for("room"),
+        "furniture": await values_for("furniture"),
         "location": await values_for("location"),
         "collection": await values_for("collection"),
         "translators": await label_values_for("translators"),
@@ -172,10 +209,10 @@ async def create_item(payload: ItemCreate, db=Depends(get_db)) -> ItemOut:
             """
             INSERT INTO items (
                 id, media_type, isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, legal_deposit, collection, volume,
-                original_year, translators, original_title, favourite, source
+                cover_url, description, location, room, furniture, notes, legal_deposit,
+                collection, volume, original_year, translators, original_title, favourite, source
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
             )
             RETURNING *
             """,
@@ -190,6 +227,8 @@ async def create_item(payload: ItemCreate, db=Depends(get_db)) -> ItemOut:
             (payload.cover_url or "").strip(),
             (payload.description or "").strip(),
             payload.location or "",
+            payload.room or "",
+            payload.furniture or "",
             payload.notes or "",
             payload.legal_deposit or "",
             payload.collection or "",
@@ -219,6 +258,8 @@ async def create_item(payload: ItemCreate, db=Depends(get_db)) -> ItemOut:
             "isbn",
             "media_type",
             "location",
+            "room",
+            "furniture",
             "notes",
             "legal_deposit",
             "collection",
@@ -241,10 +282,10 @@ async def create_item(payload: ItemCreate, db=Depends(get_db)) -> ItemOut:
             """
             INSERT INTO items (
                 id, media_type, isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, legal_deposit, collection, volume,
-                original_year, translators, original_title, favourite, source
+                cover_url, description, location, room, furniture, notes, legal_deposit,
+                collection, volume, original_year, translators, original_title, favourite, source
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
             )
             RETURNING *
             """,
@@ -259,6 +300,8 @@ async def create_item(payload: ItemCreate, db=Depends(get_db)) -> ItemOut:
             meta.get("cover_url") or "",
             meta.get("description") or "",
             payload.location or "",
+            payload.room or "",
+            payload.furniture or "",
             payload.notes or "",
             payload.legal_deposit or "",
             payload.collection or "",
@@ -301,6 +344,20 @@ async def update_item(item_id: str, payload: ItemUpdate, db=Depends(get_db)) -> 
             pass
         elif data.get("legal_deposit"):
             data["legal_deposit"] = ""
+
+    if "room" in data or "furniture" in data:
+        room, furniture, composed = resolve_placement(
+            room=data["room"] if "room" in data else row["room"],
+            furniture=data["furniture"] if "furniture" in data else row["furniture"],
+        )
+        data["room"] = room
+        data["furniture"] = furniture
+        data["location"] = composed
+    elif "location" in data:
+        room, furniture, composed = resolve_placement(location=data.get("location"))
+        data["room"] = room
+        data["furniture"] = furniture
+        data["location"] = composed
 
     if not data:
         return row_to_item(row)

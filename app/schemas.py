@@ -187,6 +187,38 @@ def normalize_authors(value: Optional[str]) -> str:
     return "; ".join(unique)
 
 
+def format_placement(room: str = "", furniture: str = "", legacy_location: str = "") -> str:
+    """Compose a single display string: ``Habitación · Mueble``."""
+    room_text = (room or "").strip()
+    furniture_text = (furniture or "").strip()
+    if room_text and furniture_text:
+        return f"{room_text} · {furniture_text}"
+    if room_text or furniture_text:
+        return room_text or furniture_text
+    return (legacy_location or "").strip()
+
+
+def resolve_placement(
+    *,
+    room: Optional[str] = None,
+    furniture: Optional[str] = None,
+    location: Optional[str] = None,
+) -> tuple[str, str, str]:
+    """Normalize room/furniture; legacy ``location`` fills ``room`` when room is empty."""
+    room_text = (room or "").strip()
+    furniture_text = (furniture or "").strip()
+    legacy = (location or "").strip()
+    if not room_text and legacy:
+        # Avoid duplicating an already-composed location into room.
+        if " · " in legacy and not furniture_text:
+            left, _, right = legacy.partition(" · ")
+            room_text, furniture_text = left.strip(), right.strip()
+        else:
+            room_text = legacy
+    composed = format_placement(room_text, furniture_text)
+    return room_text, furniture_text, composed
+
+
 class ItemCreate(BaseModel):
     """Create from ISBN lookup (print), or manually for any media type."""
 
@@ -199,7 +231,9 @@ class ItemCreate(BaseModel):
     publisher: Optional[str] = None
     cover_url: Optional[str] = None
     description: Optional[str] = None
-    location: str = ""
+    room: str = ""
+    furniture: str = ""
+    location: str = ""  # legacy; mapped into room/furniture when needed
     notes: str = ""
     legal_deposit: str = ""
     collection: str = ""
@@ -216,7 +250,9 @@ class ItemCreate(BaseModel):
         self.authors = normalize_authors(self.authors)
         self.genre = normalize_labels(self.genre)
         self.translators = normalize_authors(self.translators)
-        self.location = (self.location or "").strip()
+        self.room, self.furniture, self.location = resolve_placement(
+            room=self.room, furniture=self.furniture, location=self.location
+        )
         self.notes = (self.notes or "").strip()
         self.collection = (self.collection or "").strip()
         self.volume = (self.volume or "").strip()
@@ -258,6 +294,8 @@ class ItemUpdate(BaseModel):
     publisher: Optional[str] = None
     cover_url: Optional[str] = None
     description: Optional[str] = None
+    room: Optional[str] = None
+    furniture: Optional[str] = None
     location: Optional[str] = None
     notes: Optional[str] = None
     legal_deposit: Optional[str] = None
@@ -282,6 +320,12 @@ class ItemUpdate(BaseModel):
             self.volume = (self.volume or "").strip()
         if self.original_title is not None:
             self.original_title = (self.original_title or "").strip()
+        if self.room is not None:
+            self.room = (self.room or "").strip()
+        if self.furniture is not None:
+            self.furniture = (self.furniture or "").strip()
+        if self.location is not None:
+            self.location = (self.location or "").strip()
         if self.legal_deposit is not None:
             text = (self.legal_deposit or "").strip()
             if text.lower() in {"n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}:
@@ -307,6 +351,8 @@ class ItemOut(BaseModel):
     publisher: str = ""
     cover_url: str = ""
     description: str = ""
+    room: str = ""
+    furniture: str = ""
     location: str = ""
     notes: str = ""
     legal_deposit: str = ""
@@ -328,10 +374,22 @@ class ItemOut(BaseModel):
         return bool(isbn) and not is_local_id(isbn)
 
 
+class FurnitureStat(BaseModel):
+    value: str
+    count: int
+
+
+class RoomStat(BaseModel):
+    value: str
+    count: int
+    furniture: list[FurnitureStat] = []
+
+
 class StatsOut(BaseModel):
     total: int
     by_media_type: dict[str, int]
-    by_location: list[dict[str, int | str]]
+    by_room: list[RoomStat] = []
+    by_location: list[dict[str, int | str]] = []  # legacy flat list for older UI
 
 
 # Back-compat aliases

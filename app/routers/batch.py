@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.db import get_db
 from app.routers.common import ALLOWED_UPDATE_FIELDS
-from app.schemas import MediaType, is_print_media, normalize_authors, normalize_labels
+from app.schemas import MediaType, is_print_media, normalize_authors, normalize_labels, resolve_placement
 
 router = APIRouter(prefix="/api/items/batch", tags=["batch"])
 
@@ -109,6 +109,18 @@ async def batch_update(payload: BatchUpdateRequest, db=Depends(get_db)) -> dict:
         next_type = effective.get("media_type") or row["media_type"]
         if not is_print_media(next_type):
             effective["isbn"] = None
+
+        if "room" in effective or "furniture" in effective or "location" in effective:
+            if "room" in effective or "furniture" in effective:
+                room, furniture, composed = resolve_placement(
+                    room=effective["room"] if "room" in effective else row["room"],
+                    furniture=effective["furniture"] if "furniture" in effective else row["furniture"],
+                )
+            else:
+                room, furniture, composed = resolve_placement(location=effective.get("location"))
+            effective["room"] = room
+            effective["furniture"] = furniture
+            effective["location"] = composed
 
         assignments = []
         values: list[Any] = []

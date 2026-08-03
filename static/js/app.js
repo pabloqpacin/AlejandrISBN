@@ -43,6 +43,8 @@ const SORT_LABELS = {
   isbn: "ISBN",
   legal_deposit: "depósito legal",
   genre: "género",
+  room: "habitación",
+  furniture: "mueble",
   location: "ubicación",
   publisher: "editorial",
   collection: "colección",
@@ -53,12 +55,14 @@ const GROUP_LABELS = {
   favourite: "favorito",
   authors: "autor",
   genre: "género",
+  room: "habitación",
+  furniture: "mueble",
   location: "ubicación",
   publisher: "editorial",
   collection: "colección",
 };
 
-const COL_COUNT = 14;
+const COL_COUNT = 15;
 const selectedIds = new Set();
 
 const MEDIA_TABS = {
@@ -87,7 +91,7 @@ const inventoryPanel = document.getElementById("inventory-panel");
 const catalogNav = document.getElementById("catalog-nav");
 const overviewTotal = document.getElementById("overview-total");
 const overviewByType = document.getElementById("overview-by-type");
-const overviewByLocation = document.getElementById("overview-by-location");
+const overviewByRoom = document.getElementById("overview-by-room");
 const heroLede = document.getElementById("hero-lede");
 const manualOnlyActions = document.getElementById("manual-only-actions");
 const addManualMediaBtn = document.getElementById("add-manual-media-btn");
@@ -109,7 +113,7 @@ let facetFilters = [];
 let collapsedGroups = new Set();
 /** @type {string[]} committed search terms — OR across inventory fields */
 let searchTerms = [];
-let suggestions = { authors: [], genre: [], location: [], collection: [], translators: [] };
+let suggestions = { authors: [], genre: [], room: [], furniture: [], location: [], collection: [], translators: [] };
 let suggestionsLoadedAt = 0;
 
 function groupCollapseId(field, key) {
@@ -512,16 +516,27 @@ async function loadOverview() {
         })
         .join("");
     }
-    if (overviewByLocation) {
-      const rows = stats.by_location || [];
+    if (overviewByRoom) {
+      const rows = stats.by_room || [];
       if (!rows.length) {
-        overviewByLocation.innerHTML = `<li class="overview-empty">Sin ubicaciones aún</li>`;
+        overviewByRoom.innerHTML = `<li class="overview-empty">Sin habitaciones aún</li>`;
       } else {
-        overviewByLocation.innerHTML = rows
+        overviewByRoom.innerHTML = rows
           .map((row) => {
-            const value = String(row.value || "");
-            const isEmpty = value === "(sin ubicación)";
-            return `<li><button type="button" class="overview-link" data-goto-location="${escapeHtml(isEmpty ? "" : value)}" data-location-label="${escapeHtml(value)}"><span>${escapeHtml(value)}</span><strong>${row.count}</strong></button></li>`;
+            const room = String(row.value || "");
+            const isEmpty = room === "(sin habitación)";
+            const furniture = Array.isArray(row.furniture) ? row.furniture : [];
+            const furnitureHtml = furniture
+              .map((item) => {
+                const furn = String(item.value || "");
+                const furnEmpty = furn === "(sin mueble)";
+                return `<button type="button" class="overview-sublink" data-goto-room="${escapeHtml(isEmpty ? "" : room)}" data-goto-furniture="${escapeHtml(furnEmpty ? "" : furn)}" data-room-label="${escapeHtml(room)}" data-furniture-label="${escapeHtml(furn)}"><span>${escapeHtml(furn)}</span><strong>${item.count}</strong></button>`;
+              })
+              .join("");
+            return `<li class="overview-room">
+              <button type="button" class="overview-link" data-goto-room="${escapeHtml(isEmpty ? "" : room)}" data-room-label="${escapeHtml(room)}"><span>${escapeHtml(room)}</span><strong>${row.count}</strong></button>
+              <div class="overview-furniture">${furnitureHtml}</div>
+            </li>`;
           })
           .join("");
       }
@@ -534,6 +549,34 @@ async function loadOverview() {
 function hasRealIsbn(book) {
   const isbn = String(book?.isbn || "").trim();
   return Boolean(isbn) && !isLocalId(isbn);
+}
+
+function placementDisplay(book) {
+  const room = String(book?.room || "").trim();
+  const furniture = String(book?.furniture || "").trim();
+  if (room && furniture) return `${room} · ${furniture}`;
+  return room || furniture || String(book?.location || "").trim();
+}
+
+function placementFieldsHtml(book = {}, { autofocusRoom = false } = {}) {
+  return `
+    <div class="review-grid">
+      <label class="field">
+        <span>Habitación</span>
+        <input name="room" type="text" value="${escapeHtml(book.room || "")}" placeholder="Salón, dormitorio, trastero…" ${autofocusRoom ? "autofocus" : ""} />
+      </label>
+      <label class="field">
+        <span>Mueble</span>
+        <input name="furniture" type="text" value="${escapeHtml(book.furniture || "")}" placeholder="Estantería norte, caja 1…" />
+      </label>
+    </div>`;
+}
+
+function readPlacementFields(data) {
+  return {
+    room: String(data.get("room") || "").trim(),
+    furniture: String(data.get("furniture") || "").trim(),
+  };
 }
 
 function isbnCellHtml(book) {
@@ -836,7 +879,8 @@ function bookRowHtml(book) {
     <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
     ${printCols}
     <td class="col-genre">${labelsHtml(book.genre)}</td>
-    <td class="col-location">${escapeHtml(book.location || "—")}</td>
+    <td class="col-room">${escapeHtml(book.room || "—")}</td>
+    <td class="col-furniture">${escapeHtml(book.furniture || "—")}</td>
     <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
     <td class="col-collection" title="${escapeHtml(collectionDisplay(book))}">${escapeHtml(truncate(collectionDisplay(book) || "—", 28))}</td>
     <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
@@ -1084,7 +1128,8 @@ function openBatchFieldDialog() {
       <label class="field">
         <span>Campo</span>
         <select name="field" required>
-          <option value="location" selected>Ubicación</option>
+          <option value="room" selected>Habitación</option>
+          <option value="furniture">Mueble</option>
           <option value="genre">Género</option>
           <option value="collection">Colección</option>
           <option value="volume">Volumen</option>
@@ -1344,7 +1389,10 @@ async function wireFieldSuggestions(root) {
     showCount: true,
     multiLabel: true,
   });
-  attachSuggest(root.querySelector('input[name="location"]'), data.location || [], {
+  attachSuggest(root.querySelector('input[name="room"]'), data.room || [], {
+    showCount: true,
+  });
+  attachSuggest(root.querySelector('input[name="furniture"]'), data.furniture || [], {
     showCount: true,
   });
   attachSuggest(root.querySelector('input[name="collection"]'), data.collection || [], {
@@ -1390,10 +1438,7 @@ function openReview(isbn, meta) {
             <span>Género(s)</span>
             <input name="genre" type="text" value="${escapeHtml(meta.genre || "")}" placeholder="Novela; Ensayo; Poesía…" />
           </label>
-          <label class="field">
-            <span>Ubicación</span>
-            <input name="location" type="text" placeholder="A1, B2, Estantería norte…" autofocus />
-          </label>
+          ${placementFieldsHtml({}, { autofocusRoom: true })}
           <label class="field">
             <span>Colección</span>
             <input name="collection" type="text" placeholder="Opcional — serie, colección editorial…" />
@@ -1449,7 +1494,7 @@ function openReview(isbn, meta) {
       authors: normalizeLabelField(data.get("authors")),
       genre: normalizeLabelField(data.get("genre")),
       publisher: String(data.get("publisher") || "").trim(),
-      location: String(data.get("location") || "").trim(),
+      ...readPlacementFields(data),
       collection: String(data.get("collection") || "").trim(),
       volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
@@ -1478,7 +1523,7 @@ function openReview(isbn, meta) {
       }
       reviewDialog.close();
       isbnInput.value = "";
-      setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
+      setStatus(`Añadido: ${body.title}${placementDisplay(body) ? ` · ${placementDisplay(body)}` : ""}`);
       clearSearch(false);
       sortKey = "title";
       sortDir = "asc";
@@ -1494,7 +1539,7 @@ function openReview(isbn, meta) {
 
   reviewDialog.showModal();
   wireFieldSuggestions(reviewBody).then(() => {
-    reviewBody.querySelector('input[name="location"]')?.focus();
+    reviewBody.querySelector('input[name="room"]')?.focus();
   });
 }
 
@@ -1546,10 +1591,7 @@ function openManual() {
             <span>Género(s)</span>
             <input name="genre" type="text" placeholder="Teatro; Revista; Manual…" />
           </label>
-          <label class="field">
-            <span>Ubicación</span>
-            <input name="location" type="text" placeholder="A1, B2, Estantería norte…" />
-          </label>
+          ${placementFieldsHtml()}
           <label class="field">
             <span>Colección</span>
             <input name="collection" type="text" placeholder="Opcional — serie, colección editorial…" />
@@ -1604,7 +1646,7 @@ function openManual() {
       legal_deposit: String(data.get("legal_deposit") || "").trim(),
       genre: normalizeLabelField(data.get("genre")),
       publisher: String(data.get("publisher") || "").trim(),
-      location: String(data.get("location") || "").trim(),
+      ...readPlacementFields(data),
       collection: String(data.get("collection") || "").trim(),
       volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
@@ -1637,7 +1679,7 @@ function openManual() {
         return;
       }
       reviewDialog.close();
-      setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
+      setStatus(`Añadido: ${body.title}${placementDisplay(body) ? ` · ${placementDisplay(body)}` : ""}`);
       if (body.media_type && MEDIA_TABS[body.media_type]) {
         setActiveTab(body.media_type);
       } else {
@@ -1708,10 +1750,7 @@ function openDetail(book) {
             <span>Género(s)</span>
             <input name="genre" type="text" value="${escapeHtml(book.genre || "")}" placeholder="Novela; Ensayo…" />
           </label>
-          <label class="field">
-            <span>Ubicación</span>
-            <input name="location" type="text" value="${escapeHtml(book.location || "")}" placeholder="A1, B2…" />
-          </label>
+          ${placementFieldsHtml(book)}
           <div class="review-grid">
             <label class="field">
               <span>Colección</span>
@@ -1766,7 +1805,7 @@ function openDetail(book) {
       publication_year: yearRaw ? Number(yearRaw) : null,
       legal_deposit: String(data.get("legal_deposit") || "").trim(),
       genre: normalizeLabelField(data.get("genre")),
-      location: String(data.get("location") || "").trim(),
+      ...readPlacementFields(data),
       collection: String(data.get("collection") || "").trim(),
       volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
@@ -1981,19 +2020,29 @@ overviewPanel?.addEventListener("click", (event) => {
     setActiveTab(typeBtn.getAttribute("data-goto-tab"));
     return;
   }
-  const locBtn = event.target.closest("[data-goto-location]");
-  if (!locBtn) return;
-  const raw = locBtn.getAttribute("data-goto-location") ?? "";
-  const label = locBtn.getAttribute("data-location-label") || raw || "(sin ubicación)";
-  activeTab = "all";
-  saveActiveTab();
-  facetFilters = [
+  const furnBtn = event.target.closest("[data-goto-furniture]");
+  const roomBtn = event.target.closest("[data-goto-room]");
+  if (!furnBtn && !roomBtn) return;
+  const btn = furnBtn || roomBtn;
+  const roomRaw = btn.getAttribute("data-goto-room") ?? "";
+  const roomLabel = btn.getAttribute("data-room-label") || roomRaw || "(sin habitación)";
+  const filters = [
     {
-      field: "location",
-      key: groupKey(raw, "location"),
-      label,
+      field: "room",
+      key: groupKey(roomRaw, "room"),
+      label: roomLabel,
     },
   ];
+  if (furnBtn) {
+    const furnRaw = furnBtn.getAttribute("data-goto-furniture") ?? "";
+    const furnLabel = furnBtn.getAttribute("data-furniture-label") || furnRaw || "(sin mueble)";
+    filters.push({
+      field: "furniture",
+      key: groupKey(furnRaw, "furniture"),
+      label: furnLabel,
+    });
+  }
+  facetFilters = filters;
   saveViewState();
   setActiveTab("all");
 });

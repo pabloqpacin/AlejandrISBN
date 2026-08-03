@@ -17,6 +17,8 @@ ALLOWED_UPDATE_FIELDS = {
     "publisher",
     "cover_url",
     "description",
+    "room",
+    "furniture",
     "location",
     "notes",
     "legal_deposit",
@@ -40,6 +42,15 @@ def row_to_item(row: Any) -> ItemOut:
         data["media_type"] = media.value
     else:
         data["media_type"] = str(media)
+
+    from app.schemas import format_placement
+
+    room = str(data.get("room") or "").strip()
+    furniture = str(data.get("furniture") or "").strip()
+    legacy = str(data.get("location") or "").strip()
+    data["room"] = room
+    data["furniture"] = furniture
+    data["location"] = format_placement(room, furniture, legacy)
     return ItemOut(**data)
 
 

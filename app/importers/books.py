@@ -96,7 +96,7 @@ def _year_from(row: dict[str, Any], *keys: str) -> Optional[int]:
 
 
 def _clean_row(row: dict[str, Any]) -> Optional[dict[str, Any]]:
-    from app.schemas import normalize_authors, normalize_labels
+    from app.schemas import normalize_authors, normalize_labels, resolve_placement
 
     title = _optional_text(row.get("title"))
     media_type = _parse_media_type(row)
@@ -109,6 +109,14 @@ def _clean_row(row: dict[str, Any]) -> Optional[dict[str, Any]]:
             title = isbn
         else:
             return None
+
+    room, furniture, composed = resolve_placement(
+        room=_optional_text(row.get("room") or row.get("habitacion") or row.get("habitación")),
+        furniture=_optional_text(
+            row.get("furniture") or row.get("mueble") or row.get("estanteria") or row.get("estantería")
+        ),
+        location=_optional_text(row.get("location") or row.get("ubicacion") or row.get("ubicación")),
+    )
 
     return {
         "id": _parse_item_id(row),
@@ -123,7 +131,9 @@ def _clean_row(row: dict[str, Any]) -> Optional[dict[str, Any]]:
         "publisher": _optional_text(row.get("publisher")),
         "cover_url": _optional_text(row.get("cover_url")),
         "description": _optional_text(row.get("description")),
-        "location": _optional_text(row.get("location")),
+        "room": room,
+        "furniture": furniture,
+        "location": composed,
         "notes": _optional_text(row.get("notes")),
         "legal_deposit": _legal_deposit_from_row(row) if is_print_media(media_type) else "",
         "collection": _optional_text(row.get("collection") or row.get("coleccion")),
@@ -208,16 +218,16 @@ async def insert_items(conn: DbConnection, items: list[dict[str, Any]]) -> list[
             """
             INSERT INTO items (
                 id, media_type, isbn, title, authors, publication_year, genre, publisher,
-                cover_url, description, location, notes, legal_deposit, collection, volume,
-                original_year, translators, original_title,
+                cover_url, description, location, room, furniture, notes, legal_deposit,
+                collection, volume, original_year, translators, original_title,
                 favourite, source, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8,
                 $9, $10, $11, $12, $13, $14, $15,
-                $16, $17, $18,
-                $19, $20,
-                COALESCE($21, NOW()),
-                COALESCE($22, NOW())
+                $16, $17, $18, $19, $20,
+                $21, $22,
+                COALESCE($23, NOW()),
+                COALESCE($24, NOW())
             )
             ON CONFLICT (id) DO NOTHING
             """,
@@ -231,7 +241,9 @@ async def insert_items(conn: DbConnection, items: list[dict[str, Any]]) -> list[
             item["publisher"],
             item["cover_url"],
             item["description"],
-            item["location"],
+            item.get("location") or "",
+            item.get("room") or "",
+            item.get("furniture") or "",
             item["notes"],
             item.get("legal_deposit") or "",
             item.get("collection") or "",

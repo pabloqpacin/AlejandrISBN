@@ -297,6 +297,40 @@ html[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
   padding: 0.4rem 0;
 }
 
+.overview-room {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.overview-furniture {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0 0 0.35rem 0.85rem;
+}
+
+.overview-sublink {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  appearance: none;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.45rem;
+  cursor: pointer;
+}
+
+.overview-sublink:hover {
+  border-color: color-mix(in srgb, var(--ink) 30%, var(--line));
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+}
+
 .manual-only-actions {
   display: flex;
   justify-content: center;
