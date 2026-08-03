@@ -505,6 +505,13 @@ async def apply_seeds() -> None:
                     # Lookups are slow; do not wrap the whole file in one DB transaction.
                     await _apply_csv(conn, path)
                     await _mark_applied(conn, path.name, checksum)
+                elif IS_SQLITE:
+                    # SQLite: apply without a long explicit transaction (simpler + reliable).
+                    if suffix == ".json":
+                        await _apply_json(conn, path)
+                    else:
+                        await _apply_sql(conn, path)
+                    await _mark_applied(conn, path.name, checksum)
                 else:
                     async with conn.transaction():
                         if suffix == ".json":

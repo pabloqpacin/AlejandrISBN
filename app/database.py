@@ -100,7 +100,12 @@ def _bind_sqlite(sql: str, args: tuple[Any, ...]) -> tuple[str, tuple[Any, ...]]
         idx = int(match.group(1)) - 1
         if idx < 0 or idx >= len(args):
             raise IndexError(f"SQL placeholder ${idx + 1} out of range ({len(args)} args)")
-        bound.append(args[idx])
+        value = args[idx]
+        if hasattr(value, "isoformat"):
+            value = value.isoformat()
+        elif isinstance(value, bool):
+            value = int(value)
+        bound.append(value)
         return "?"
 
     return _PARAM_RE.sub(repl, sql), tuple(bound)
@@ -153,8 +158,9 @@ class PgConnection:
 class SqliteConnection:
     """Assumes caller serializes access (pool.acquire holds the lock)."""
 
-    def __init__(self, conn: Any) -> None:
+    def __init__(self, conn: Any, *, autocommit: bool = True) -> None:
         self._conn = conn
+        self._autocommit = autocommit
 
     async def fetch(self, query: str, *args: Any) -> list[Any]:
         sql, params = _bind_sqlite(query, args)
@@ -177,7 +183,8 @@ class SqliteConnection:
     async def execute(self, query: str, *args: Any) -> str:
         sql, params = _bind_sqlite(query, args)
         cursor = await self._conn.execute(sql, params)
-        await self._conn.commit()
+        if self._autocommit:
+            await self._conn.commit()
         rowcount = cursor.rowcount if cursor.rowcount is not None else 0
         upper = sql.lstrip().upper()
         if upper.startswith("DELETE"):
@@ -190,34 +197,18 @@ class SqliteConnection:
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator["SqliteConnection"]:
+        # isolation_level=None (set on connect) → manual BEGIN/commit/rollback
         await self._conn.execute("BEGIN")
+        txn = SqliteConnection(self._conn, autocommit=False)
         try:
-            # Avoid auto-commit inside the transaction
-            txn = _SqliteTxnConnection(self._conn)
             yield txn
-            await self._conn.execute("COMMIT")
+            await self._conn.commit()
         except Exception:
-            await self._conn.execute("ROLLBACK")
+            try:
+                await self._conn.rollback()
+            except Exception:
+                pass
             raise
-
-
-class _SqliteTxnConnection(SqliteConnection):
-    async def execute(self, query: str, *args: Any) -> str:
-        sql, params = _bind_sqlite(query, args)
-        cursor = await self._conn.execute(sql, params)
-        rowcount = cursor.rowcount if cursor.rowcount is not None else 0
-        upper = sql.lstrip().upper()
-        if upper.startswith("DELETE"):
-            return f"DELETE {rowcount}"
-        if upper.startswith("INSERT"):
-            return f"INSERT 0 {max(rowcount, 0)}"
-        if upper.startswith("UPDATE"):
-            return f"UPDATE {rowcount}"
-        return f"OK {rowcount}"
-
-    @asynccontextmanager
-    async def transaction(self) -> AsyncIterator["_SqliteTxnConnection"]:
-        yield self
 
 
 DbConnection = Union[PgConnection, SqliteConnection]
@@ -236,8 +227,11 @@ class _SqlitePool:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(str(self.path))
         self._conn.row_factory = aiosqlite.Row
+        # Manual transactions only (avoids "cannot commit/rollback — no transaction")
+        self._conn.isolation_level = None
         await self._conn.execute("PRAGMA foreign_keys = ON")
         await self._conn.execute("PRAGMA journal_mode = WAL")
+        await self._conn.commit()
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -249,7 +243,7 @@ class _SqlitePool:
         if self._conn is None:
             raise RuntimeError("SQLite pool is not initialized")
         async with self._lock:
-            yield SqliteConnection(self._conn)
+            yield SqliteConnection(self._conn, autocommit=True)
 
 
 # --- lifecycle ---------------------------------------------------------------
