@@ -40,6 +40,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-build.txt
 
+      - name: Write VERSION for the desktop bundle
+        shell: pwsh
+        run: |
+          Set-Content -Path VERSION -Value "${{ steps.ver.outputs.version }}" -NoNewline
+          Get-Content VERSION
+
       - name: Build with PyInstaller
         run: pyinstaller alejandrisbn.spec
 

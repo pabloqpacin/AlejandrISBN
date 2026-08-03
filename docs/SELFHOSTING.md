@@ -7,7 +7,8 @@
 3. Se crea icono en el Escritorio / menú Inicio
 4. Puedes **borrar el Setup** descargado; la app queda en `%LOCALAPPDATA%\Programs\AlejandrISBN`
 5. Para salir: cierra la ventanita “AlejandrISBN”
-6. Para quitar la app: Ajustes → Aplicaciones → AlejandrISBN → Desinstalar  
+6. **Actualizar:** en esa ventanita, *Buscar actualizaciones* (solo el `.exe` instalado; no aplica a Docker)
+7. Para quitar la app: Ajustes → Aplicaciones → AlejandrISBN → Desinstalar  
    (los libros en `%LOCALAPPDATA%\AlejandrISBN\` **no** se borran)
 
 **Restaurar un JSON:** con la app abierta, usa **Importar** (junto a Exportar).  

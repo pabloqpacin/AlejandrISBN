@@ -253,8 +253,109 @@ def _stop_process(proc: subprocess.Popen) -> None:
             pass
 
 
+def _is_windows_desktop_build() -> bool:
+    """True only for the packaged Windows .exe — never for Docker/Linux/dev."""
+    return os.name == "nt" and bool(getattr(sys, "frozen", False))
+
+
+def _fetch_latest_release() -> dict:
+    import json
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    from app.version import get_github_repo
+
+    repo = get_github_repo()
+    url = f"https://api.github.com/repos/{repo}/releases/latest"
+    req = Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "AlejandrISBN-Updater",
+        },
+    )
+    try:
+        with urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise RuntimeError(f"GitHub API HTTP {exc.code}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Sin red / GitHub: {exc.reason}") from exc
+
+
+def _find_setup_asset(release: dict) -> tuple[str, str]:
+    for asset in release.get("assets") or []:
+        name = asset.get("name") or ""
+        if name.lower() == "alejandrisbn-setup.exe":
+            url = asset.get("browser_download_url")
+            if url:
+                return url, name
+    for asset in release.get("assets") or []:
+        name = (asset.get("name") or "").lower()
+        if name.endswith("setup.exe"):
+            url = asset.get("browser_download_url")
+            if url:
+                return url, asset.get("name") or "AlejandrISBN-Setup.exe"
+    raise RuntimeError(
+        "El release no incluye AlejandrISBN-Setup.exe.\n"
+        "Publica un tag para que build-windows lo adjunte."
+    )
+
+
+def _download_file(url: str, dest: Path) -> None:
+    from urllib.request import Request, urlopen
+
+    req = Request(url, headers={"User-Agent": "AlejandrISBN-Updater"})
+    with urlopen(req, timeout=120) as resp, dest.open("wb") as out:
+        while True:
+            chunk = resp.read(1024 * 256)
+            if not chunk:
+                break
+            out.write(chunk)
+
+
+def _write_and_launch_updater(setup_path: Path) -> None:
+    exe = Path(sys.executable).resolve()
+    script = _data_dir() / "apply-update.ps1"
+    ps = f"""
+$ErrorActionPreference = 'Stop'
+$setup = {setup_path.as_posix()!r}
+$exe = {exe.as_posix()!r}
+$pidToWait = {os.getpid()}
+try {{
+  Wait-Process -Id $pidToWait -ErrorAction SilentlyContinue
+}} catch {{}}
+Start-Sleep -Seconds 2
+$setupArgs = @('/VERYSILENT','/NORESTART','/SUPPRESSMSGBOXES','/CLOSEAPPLICATIONS=yes')
+Start-Process -FilePath $setup -ArgumentList $setupArgs -Wait
+Start-Sleep -Seconds 1
+if (Test-Path -LiteralPath $exe) {{
+  Start-Process -FilePath $exe
+}}
+"""
+    script.write_text(ps, encoding="utf-8")
+    _log(f"launching updater script {script}")
+    subprocess.Popen(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            str(script),
+        ],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
 def _show_window(on_close) -> None:
+    import threading
     import tkinter as tk
+    from tkinter import messagebox
+
+    from app.version import get_version, is_newer, normalize_version
 
     root = tk.Tk()
     root.title("AlejandrISBN")
@@ -263,22 +364,120 @@ def _show_window(on_close) -> None:
     frame = tk.Frame(root, padx=20, pady=16)
     frame.pack()
 
+    version = get_version()
     tk.Label(frame, text="AlejandrISBN", font=("Segoe UI", 14, "bold")).pack(anchor="w")
     tk.Label(
         frame,
         text="La biblioteca está en marcha.\nCierra esta ventana para salir.",
         justify="left",
         font=("Segoe UI", 10),
-    ).pack(anchor="w", pady=(8, 12))
+    ).pack(anchor="w", pady=(8, 8))
     tk.Label(frame, text=URL, fg="#1f4a36", font=("Segoe UI", 10)).pack(anchor="w")
-
-    tk.Button(frame, text="Abrir en el navegador", command=lambda: webbrowser.open(URL)).pack(
-        anchor="w", pady=(14, 0)
+    tk.Label(frame, text=f"Versión {version}", fg="#666666", font=("Segoe UI", 9)).pack(
+        anchor="w", pady=(6, 0)
     )
+
+    status = tk.Label(frame, text="", justify="left", font=("Segoe UI", 9), wraplength=320)
+    status.pack(anchor="w", pady=(8, 0))
+
+    btn_row = tk.Frame(frame)
+    btn_row.pack(anchor="w", pady=(14, 0))
+
+    tk.Button(btn_row, text="Abrir en el navegador", command=lambda: webbrowser.open(URL)).pack(
+        side="left"
+    )
+
+    update_btn: object | None = None
 
     def handle_close() -> None:
         on_close()
         root.destroy()
+
+    def run_update_flow() -> None:
+        btn = update_btn
+        assert btn is not None
+        btn.configure(state="disabled")
+        status.configure(text="Comprobando en GitHub…")
+
+        def work() -> None:
+            try:
+                release = _fetch_latest_release()
+                remote = normalize_version(release.get("tag_name") or release.get("name") or "")
+                if not remote:
+                    raise RuntimeError("Release sin tag")
+                local = normalize_version(get_version())
+                if not is_newer(remote, local):
+
+                    def up_to_date() -> None:
+                        status.configure(text=f"Ya estás al día ({local}).")
+                        btn.configure(state="normal")
+                        messagebox.showinfo(
+                            "AlejandrISBN",
+                            f"No hay actualizaciones.\nVersión actual: {local}",
+                        )
+
+                    root.after(0, up_to_date)
+                    return
+
+                url, asset_name = _find_setup_asset(release)
+
+                def ask() -> None:
+                    ok = messagebox.askyesno(
+                        "AlejandrISBN",
+                        f"Hay una versión nueva: {remote}\n"
+                        f"(tú tienes {local})\n\n"
+                        "Se descargará el instalador y se aplicará solo.\n"
+                        "Tus libros no se borran.\n\n¿Actualizar ahora?",
+                    )
+                    if not ok:
+                        status.configure(text="")
+                        btn.configure(state="normal")
+                        return
+                    status.configure(text=f"Descargando {asset_name}…")
+
+                    def download_and_apply() -> None:
+                        try:
+                            dest = _data_dir() / asset_name
+                            _download_file(url, dest)
+                            _log(f"downloaded update to {dest}")
+                            _write_and_launch_updater(dest)
+
+                            def finish() -> None:
+                                status.configure(text="Instalando… la app se cerrará.")
+                                on_close()
+                                root.destroy()
+
+                            root.after(0, finish)
+                        except Exception as exc:
+                            err = str(exc)
+                            _log(f"update failed: {err}")
+
+                            def fail() -> None:
+                                status.configure(text="Error al actualizar.")
+                                btn.configure(state="normal")
+                                messagebox.showerror("AlejandrISBN", err)
+
+                            root.after(0, fail)
+
+                    threading.Thread(target=download_and_apply, daemon=True).start()
+
+                root.after(0, ask)
+            except Exception as exc:
+                err = str(exc)
+                _log(f"update check failed: {err}")
+
+                def fail_check() -> None:
+                    status.configure(text="No se pudo comprobar la actualización.")
+                    btn.configure(state="normal")
+                    messagebox.showerror("AlejandrISBN", err)
+
+                root.after(0, fail_check)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    if _is_windows_desktop_build():
+        update_btn = tk.Button(btn_row, text="Buscar actualizaciones", command=run_update_flow)
+        update_btn.pack(side="left", padx=(8, 0))
 
     root.protocol("WM_DELETE_WINDOW", handle_close)
     root.update_idletasks()

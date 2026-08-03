@@ -11,9 +11,9 @@
 
 ```text
 push / PR     →  CI Docker smoke
-tag vX.Y.Z    →  build-windows.yml → AlejandrISBN-windows.zip en el Release
+tag vX.Y.Z    →  build-windows.yml → AlejandrISBN-Setup.exe (+ ZIP) en el Release
                 + release.yml → imagen GHCR (opcional)
-usuario final → descarga ZIP → AlejandrISBN.exe / icono Escritorio
+usuario final → Setup.exe → icono; luego “Buscar actualizaciones” en la ventanita
 ```
 
 ## Workflows
@@ -21,7 +21,7 @@ usuario final → descarga ZIP → AlejandrISBN.exe / icono Escritorio
 | Archivo | Disparador | Qué hace |
 |---------|------------|----------|
 | `.github/workflows/ci.yml` | push/PR | Build Docker + smoke `/api/health` |
-| `.github/workflows/build-windows.yml` | tag `v*` / manual | PyInstaller → ZIP del `.exe` |
+| `.github/workflows/build-windows.yml` | tag `v*` / manual | PyInstaller → Inno Setup → Setup.exe + ZIP |
 | `.github/workflows/release.yml` | tag `v*` | Push GHCR + notas |
 
 ## Cómo publicar una versión para tu colega
@@ -37,15 +37,14 @@ En Actions debe aparecer **build-windows**; el Release incluirá `AlejandrISBN-w
 
 También puedes lanzar *build-windows* a mano (workflow_dispatch) y bajar el artifact sin tag.
 
-## Experiencia de usuario (instalador)
+## Actualizaciones (solo Windows instalado)
 
-1. Descarga `AlejandrISBN-Setup.exe` del Release  
-2. Next/Next/Finish (sin admin; instala en `%LOCALAPPDATA%\Programs\AlejandrISBN`)  
-3. Icono Escritorio / Inicio  
-4. Borra el Setup si quieres  
+El botón **Buscar actualizaciones** aparece únicamente en el `.exe` empaquetado (Inno).  
+Comprueba el último Release en GitHub, descarga `AlejandrISBN-Setup.exe` e instala en silencio.
 
-CI: PyInstaller → Inno Setup (`packaging/windows/AlejandrISBN.iss`) → Setup + ZIP en el Release.  
-**Coste:** $0 (Inno Setup OSS + Actions). Firma Authenticode = opcional/pago.
+- **No afecta** a `docker compose` / Linux / desarrollo con git  
+- La base de datos en `%LOCALAPPDATA%\AlejandrISBN\` **no se borra**  
+- Repo configurable: env `ALEJANDRISBN_GITHUB_REPO` (por defecto `pabloqpacin/AlejandrISBN`)
 
 ## Checklist
 
@@ -57,5 +56,4 @@ CI: PyInstaller → Inno Setup (`packaging/windows/AlejandrISBN.iss`) → Setup 
 ## Fuera de alcance aún
 
 - MSIX / Microsoft Store
-- Auto-update
 - Firma Authenticode de pago

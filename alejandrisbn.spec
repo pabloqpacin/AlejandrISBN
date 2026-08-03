@@ -10,6 +10,9 @@ from pathlib import Path
 block_cipher = None
 
 datas = [("static", "static")]
+version_file = Path("VERSION")
+if version_file.is_file():
+    datas.append((str(version_file), "."))
 readme = Path("packaging/windows-seed-README.txt")
 if readme.is_file():
     datas.append((str(readme), "packaging"))
@@ -47,6 +50,8 @@ a = Analysis(
         "app.seed",
         "app.schemas",
         "app.services.isbn_lookup",
+        "app.version",
+        "app.desktop_app",
     ],
     hookspath=[],
     hooksconfig={},

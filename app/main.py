@@ -98,8 +98,15 @@ async def index() -> FileResponse:
 
 @app.get("/api/health", tags=["health"])
 async def health(db=Depends(get_db)) -> dict:
+    from app.version import get_version
+
     await db.fetchval("SELECT 1")
-    return {"status": "ok", "app": "AlejandrISBN", "db": BACKEND}
+    return {
+        "status": "ok",
+        "app": "AlejandrISBN",
+        "db": BACKEND,
+        "version": get_version(),
+    }
 
 
 @app.get("/api/books", response_model=list[BookOut], tags=["books"])
