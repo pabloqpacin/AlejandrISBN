@@ -82,7 +82,3 @@ async def init_db() -> None:
         else:
             # SQLite: DDL auto-commits; avoid wrapping in an explicit transaction.
             await ensure_books_schema(conn, is_sqlite=True)
-
-    from app.seed import apply_seeds
-
-    await apply_seeds()

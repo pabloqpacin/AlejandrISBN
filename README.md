@@ -60,20 +60,10 @@ export ALEJANDRISBN_BACKEND=sqlite   # Windows: set ALEJANDRISBN_BACKEND=sqlite
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Seeds / bootstrap DB
+## Bootstrap DB / importar inventario
 
 - **Primer arranque del volumen:** SQL en `postgres/init/` (entrypoint oficial de Postgres).
-- **Día a día:** deja `*.json`, `*.csv` o `*.sql` en `seed/` → la API los aplica al arrancar (idempotente por checksum).
-  - **JSON / CSV** → escribe filas directamente (sin red)
-  - Luego, en la UI: **Completar online** para rellenar vacíos con preview/confirmación
-
-Ver `seed/README.md`.
-
-```bash
-cp seed/books.example.json seed/books.json
-# o: cp seed/books.example.csv seed/books.csv
-docker compose restart alejandrisbn
-```
+- **Restaurar inventario:** en la UI, **Importar** (JSON/CSV exportado). Luego **Completar online** si quieres rellenar vacíos.
 
 ## Arranque (local, desarrollo)
 
@@ -98,7 +88,7 @@ Docs: http://localhost:8000/docs
 | `POST` | `/api/books` | Añadir por ISBN (lookup) o sin ISBN (`title` obligatorio) |
 | `PATCH` | `/api/books/{isbn}` | Actualizar campos |
 | `DELETE` | `/api/books/{isbn}` | Eliminar |
-| `GET` | `/api/export/books?format=json\|csv` | Descargar inventario (JSON seed o CSV) |
+| `GET` | `/api/export/books?format=json\|csv` | Descargar inventario (JSON o CSV) |
 | `POST` | `/api/import/books` | Importar JSON/CSV (multipart `file`, sin red) |
 | `POST` | `/api/enrich/preview` | Sugerencias online para campos vacíos |
 | `POST` | `/api/enrich/apply` | Aplicar campos confirmados |

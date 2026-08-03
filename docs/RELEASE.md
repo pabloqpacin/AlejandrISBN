@@ -51,7 +51,7 @@ Comprueba el último Release en GitHub, descarga `AlejandrISBN-Setup.exe` e inst
 - [ ] Probar artifact `AlejandrISBN-windows.zip` en un Windows real
 - [ ] SmartScreen: sin firma puede avisar la primera vez (certificado Authenticode = siguiente nivel)
 - [ ] Icono `.ico` custom (opcional)
-- [ ] Probar restore JSON vía carpeta `seed` junto al exe
+- [ ] Probar restore JSON vía **Importar** en la UI
 
 ## Fuera de alcance aún
 

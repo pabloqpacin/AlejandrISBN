@@ -1,6 +1,6 @@
 """Fill empty bibliographic fields from online ISBN lookup (user-confirmed).
 
-Import/seed never call this — they stay offline. The UI asks for a preview,
+Import never calls this — it stays offline. The UI asks for a preview,
 then posts confirmed field updates to ``apply_updates``.
 """
 

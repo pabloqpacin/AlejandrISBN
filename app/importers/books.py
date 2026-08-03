@@ -1,21 +1,18 @@
-import hashlib
-import json
+"""Offline inventory import helpers (JSON / CSV → book rows → DB insert)."""
+
+from __future__ import annotations
+
 import logging
-import os
 from csv import DictReader
 from datetime import datetime
 from io import StringIO
-from pathlib import Path
 from typing import Any, Optional
 
-from app.db import DbConnection, acquire
-from app.db import runtime as db_runtime
+from app.db import DbConnection
 
-logger = logging.getLogger("alejandrisbn.seed")
+logger = logging.getLogger("alejandrisbn.importers")
 
-SEED_DIR = Path(os.getenv("SEED_DIR", Path(__file__).resolve().parent.parent / "seed"))
-
-SEED_SUFFIXES = {".json", ".sql", ".csv"}
+_NA_VALUES = {"", "n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}
 
 
 def _parse_ts(value: Any) -> Optional[datetime]:
@@ -42,33 +39,8 @@ def _parse_bool(value: Any) -> bool:
     return text in {"1", "true", "t", "yes", "y", "si", "sí"}
 
 
-def _checksum(path: Path) -> str:
-    digest = hashlib.sha256()
-    digest.update(path.read_bytes())
-    return digest.hexdigest()
-
-
-def _split_sql(script: str) -> list[str]:
-    """Split a SQL file into statements (no dollar-quoting support; keep seeds simple)."""
-    statements: list[str] = []
-    for chunk in script.split(";"):
-        lines = []
-        for line in chunk.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("--"):
-                continue
-            lines.append(line)
-        statement = "\n".join(lines).strip()
-        if statement:
-            statements.append(statement)
-    return statements
-
-
 def _normalize_isbn(value: str) -> str:
     return "".join(ch for ch in str(value) if ch.isalnum()).upper()
-
-
-_NA_VALUES = {"", "n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}
 
 
 def _optional_text(value: Any) -> str:
@@ -83,7 +55,7 @@ def _legal_deposit_from_row(row: dict[str, Any]) -> str:
     return _optional_text(row.get("legal_deposit") or row.get("deposito_legal") or "")
 
 
-def _books_from_json(payload: Any) -> list[dict[str, Any]]:
+def books_from_json(payload: Any) -> list[dict[str, Any]]:
     from app.schemas import generate_local_id, is_local_id, normalize_authors, normalize_labels
 
     if isinstance(payload, dict):
@@ -94,7 +66,7 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
     elif isinstance(payload, list):
         rows = payload
     else:
-        raise ValueError("JSON seed must be a list of books or an object with a 'books' array")
+        raise ValueError("JSON must be a list of books or an object with a 'books' array")
 
     cleaned: list[dict[str, Any]] = []
     for row in rows:
@@ -112,7 +84,7 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
         else:
             isbn = _normalize_isbn(raw_isbn)
             if len(isbn) not in (10, 13):
-                logger.warning("JSON seed: skipping invalid ISBN %r for %r", row.get("isbn"), title)
+                logger.warning("JSON import: skipping invalid ISBN %r for %r", row.get("isbn"), title)
                 continue
 
         cleaned.append(
@@ -136,7 +108,7 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
                     row.get("original_title") or row.get("titulo_original")
                 ),
                 "favourite": bool(row.get("favourite", False)),
-                "source": _optional_text(row.get("source")) or "seed",
+                "source": _optional_text(row.get("source")) or "import",
                 "created_at": _parse_ts(row.get("created_at")),
                 "updated_at": _parse_ts(row.get("updated_at")),
             }
@@ -144,7 +116,7 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
     return cleaned
 
 
-def _books_from_import_csv(text: str) -> list[dict[str, Any]]:
+def books_from_csv(text: str) -> list[dict[str, Any]]:
     """Parse an export-style CSV (full inventory columns) into book rows for insert."""
     from app.schemas import generate_local_id, is_local_id, normalize_authors, normalize_labels
 
@@ -231,41 +203,7 @@ def _books_from_import_csv(text: str) -> list[dict[str, Any]]:
     return cleaned
 
 
-async def _ensure_seed_table(conn: DbConnection) -> None:
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS schema_seeds (
-            filename   TEXT PRIMARY KEY,
-            checksum   TEXT NOT NULL,
-            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """
-    )
-
-
-async def _already_applied(conn: DbConnection, filename: str, checksum: str) -> bool:
-    row = await conn.fetchrow(
-        "SELECT checksum FROM schema_seeds WHERE filename = $1",
-        filename,
-    )
-    return bool(row and row["checksum"] == checksum)
-
-
-async def _mark_applied(conn: DbConnection, filename: str, checksum: str) -> None:
-    await conn.execute(
-        """
-        INSERT INTO schema_seeds (filename, checksum, applied_at)
-        VALUES ($1, $2, NOW())
-        ON CONFLICT (filename) DO UPDATE
-        SET checksum = EXCLUDED.checksum,
-            applied_at = NOW()
-        """,
-        filename,
-        checksum,
-    )
-
-
-async def _insert_books(conn: DbConnection, books: list[dict[str, Any]]) -> list[str]:
+async def insert_books(conn: DbConnection, books: list[dict[str, Any]]) -> list[str]:
     """Insert books; return ISBNs that were newly inserted (conflicts skipped)."""
     inserted_isbns: list[str] = []
     for book in books:
@@ -311,107 +249,3 @@ async def _insert_books(conn: DbConnection, books: list[dict[str, Any]]) -> list
         if result.startswith("INSERT") and not result.rstrip().endswith(" 0"):
             inserted_isbns.append(book["isbn"])
     return inserted_isbns
-
-
-async def _apply_json(conn: DbConnection, path: Path) -> None:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    books = _books_from_json(payload)
-    inserted = await _insert_books(conn, books)
-    logger.info(
-        "Seed JSON %s: %s book(s) in file, %s inserted",
-        path.name,
-        len(books),
-        len(inserted),
-    )
-
-
-async def _apply_sql(conn: DbConnection, path: Path) -> None:
-    script = path.read_text(encoding="utf-8")
-    statements = _split_sql(script)
-    for statement in statements:
-        await conn.execute(statement)
-    logger.info("Seed SQL %s: executed %s statement(s)", path.name, len(statements))
-
-
-async def _apply_csv(conn: DbConnection, path: Path) -> None:
-    """Offline CSV seed — same parser as UI import (no online lookup)."""
-    text = path.read_text(encoding="utf-8-sig")
-    books = _books_from_import_csv(text)
-    for book in books:
-        if not book.get("source") or book["source"] == "import":
-            book["source"] = "seed"
-    inserted = await _insert_books(conn, books)
-    logger.info(
-        "Seed CSV %s: parsed %s row(s), inserted %s (offline)",
-        path.name,
-        len(books),
-        len(inserted),
-    )
-
-
-def _seed_files() -> list[Path]:
-    if not SEED_DIR.exists():
-        return []
-    return [
-        path
-        for path in sorted(SEED_DIR.iterdir())
-        if path.is_file()
-        and path.suffix.lower() in SEED_SUFFIXES
-        and ".example." not in path.name
-        and not path.name.endswith(".example.json")
-        and not path.name.endswith(".example.sql")
-        and not path.name.endswith(".example.csv")
-    ]
-
-
-async def apply_seeds() -> None:
-    """
-    Apply new/changed files from SEED_DIR.
-
-    - *.json  → write book rows directly (ON CONFLICT DO NOTHING)
-    - *.csv   → same offline insert as UI import (no online lookup)
-    - *.sql   → run SQL statements
-
-    Tracked in schema_seeds by filename + checksum (re-apply if file changes).
-    """
-    from app.db import runtime as db_runtime
-
-    if db_runtime.pool is None:
-        raise RuntimeError("Database pool is not initialized")
-
-    files = _seed_files()
-    if not files:
-        logger.info("No seed files found in %s", SEED_DIR)
-        return
-
-    async with acquire() as conn:
-        await _ensure_seed_table(conn)
-        for path in files:
-            checksum = _checksum(path)
-            if await _already_applied(conn, path.name, checksum):
-                logger.info("Seed %s already applied (unchanged)", path.name)
-                continue
-            try:
-                suffix = path.suffix.lower()
-                if suffix == ".csv":
-                    # Lookups are slow; do not wrap the whole file in one DB transaction.
-                    await _apply_csv(conn, path)
-                    await _mark_applied(conn, path.name, checksum)
-                elif db_runtime.IS_SQLITE:
-                    # SQLite: apply without a long explicit transaction (simpler + reliable).
-                    if suffix == ".json":
-                        await _apply_json(conn, path)
-                    else:
-                        await _apply_sql(conn, path)
-                    await _mark_applied(conn, path.name, checksum)
-                else:
-                    async with conn.transaction():
-                        if suffix == ".json":
-                            await _apply_json(conn, path)
-                        else:
-                            await _apply_sql(conn, path)
-                        await _mark_applied(conn, path.name, checksum)
-                logger.info("Applied seed %s", path.name)
-            except Exception:
-                logger.exception("Failed to apply seed %s", path.name)
-                raise

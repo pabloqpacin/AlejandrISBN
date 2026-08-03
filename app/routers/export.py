@@ -19,7 +19,7 @@ async def export_books(
     format: str = Query("json", pattern="^(json|csv)$"),
     db=Depends(get_db),
 ) -> Response:
-    """Download full inventory as JSON (seed) or CSV (Sheets/Excel)."""
+    """Download full inventory as JSON or CSV (Sheets/Excel)."""
     rows = await db.fetch("SELECT * FROM books ORDER BY title ASC")
     books = []
     for row in rows:

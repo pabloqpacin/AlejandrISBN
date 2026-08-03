@@ -7,14 +7,16 @@ import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.db import get_db
-from app.seed import _books_from_import_csv, _books_from_json, _insert_books
+from app.importers import books_from_csv, books_from_json, insert_books
 
 router = APIRouter(prefix="/api/import", tags=["import"])
+
+_LEGACY_SEED_SOURCES = {"seed", "seed-csv:lookup", "seed-csv:manual"}
 
 
 @router.post("/books")
 async def import_books(
-    file: UploadFile = File(..., description="JSON or CSV export/seed"),
+    file: UploadFile = File(..., description="JSON or CSV inventory export"),
     db=Depends(get_db),
 ) -> dict:
     """Import books from a JSON or CSV file (same shapes as ``/api/export/books``).
@@ -39,9 +41,9 @@ async def import_books(
 
     try:
         if is_csv:
-            books = _books_from_import_csv(text)
+            books = books_from_csv(text)
         else:
-            books = _books_from_json(json.loads(text))
+            books = books_from_json(json.loads(text))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail=f"JSON inválido: {exc}") from exc
     except ValueError as exc:
@@ -51,10 +53,10 @@ async def import_books(
         raise HTTPException(status_code=400, detail="No hay libros válidos en el archivo")
 
     for book in books:
-        if not book.get("source") or book["source"] in {"seed", "seed-csv:lookup", "seed-csv:manual"}:
+        if not book.get("source") or book["source"] in _LEGACY_SEED_SOURCES:
             book["source"] = "import"
 
-    inserted_isbns = await _insert_books(db, books)
+    inserted_isbns = await insert_books(db, books)
     return {
         "ok": True,
         "format": "csv" if is_csv else "json",

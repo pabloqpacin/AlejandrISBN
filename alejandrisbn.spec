@@ -16,14 +16,6 @@ datas += collect_data_files("certifi")
 version_file = Path("VERSION")
 if version_file.is_file():
     datas.append((str(version_file), "."))
-readme = Path("packaging/windows-seed-README.txt")
-if readme.is_file():
-    datas.append((str(readme), "packaging"))
-seed_dir = Path("seed")
-if seed_dir.is_dir():
-    for path in seed_dir.iterdir():
-        if path.is_file() and (".example." in path.name or path.name == "README.md"):
-            datas.append((str(path), "seed"))
 
 a = Analysis(
     ["app/desktop_app.py"],
@@ -59,7 +51,8 @@ a = Analysis(
         "app.db.postgres",
         "app.db.sqlite",
         "app.database",
-        "app.seed",
+        "app.importers",
+        "app.importers.books",
         "app.schemas",
         "app.services.isbn_lookup",
         "app.services.isbn_lookup.util",

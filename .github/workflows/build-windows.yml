@@ -49,16 +49,6 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller alejandrisbn.spec
 
-      - name: Add seed folder + README next to the exe
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist/AlejandrISBN/seed | Out-Null
-          if (Test-Path packaging/windows-seed-README.txt) {
-            Copy-Item -Force packaging/windows-seed-README.txt dist/AlejandrISBN/seed/README.txt
-          } else {
-            Set-Content -Path dist/AlejandrISBN/seed/README.txt -Value "Pon aqui un JSON exportado y reinicia AlejandrISBN.`n"
-          }
-
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -108,7 +98,7 @@ jobs:
 
             **Datos** (no se borran al desinstalar): `%LOCALAPPDATA%\AlejandrISBN\`
 
-            **Importar JSON:** carpeta `seed\` dentro de la instalación (hay un README.txt).
+            **Importar JSON/CSV:** con la app abierta, usa **Importar** (junto a Exportar).
 
             También adjunto: `AlejandrISBN-windows.zip` (portable, sin instalador).
 

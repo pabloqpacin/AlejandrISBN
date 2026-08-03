@@ -11,8 +11,7 @@
 7. Para quitar la app: Ajustes → Aplicaciones → AlejandrISBN → Desinstalar  
    (los libros en `%LOCALAPPDATA%\AlejandrISBN\` **no** se borran)
 
-**Restaurar un JSON:** con la app abierta, usa **Importar** (junto a Exportar).  
-También puedes dejar el JSON en `seed\` y reiniciar (ver `README.txt` ahí).
+**Restaurar un JSON:** con la app abierta, usa **Importar** (junto a Exportar).
 
 No hace falta Python ni Docker. Inno Setup / el build son **gratis** (sin certificado de firma; Windows puede avisar “origen desconocido” la primera vez — *Más información → Ejecutar de todas formas*).
 
@@ -61,7 +60,7 @@ Tus libros se quedan en tu PC. No se suben a ningún servidor externo (salvo con
 5. Para parar: Ctrl+C en esa ventana, o `stop-desktop.bat`
 
 **Datos:** `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`  
-**Restaurar un JSON de backup:** copia el archivo a la carpeta `seed\` del proyecto y reinicia.
+**Restaurar un JSON de backup:** con la app abierta, usa **Importar** (junto a Exportar).
 
 Para probar la ventanita de control sin PyInstaller:
 
@@ -227,30 +226,11 @@ El JSON es el formato ideal para **restaurar** después (cambio de PC, reinstala
 
 ### Restaurar desde un JSON
 
-La app lee automáticamente los archivos de la carpeta `seed/` al arrancar.
+1. Con la app en marcha, abre [http://localhost:8000](http://localhost:8000)
+2. Usa **Importar** (junto a Exportar) y elige tu archivo `.json` o `.csv`
+3. Comprueba que aparecen los libros
 
-1. Copia tu archivo exportado a la carpeta `seed` del proyecto, por ejemplo:
-
-   ```text
-   Documentos\AlejandrISBN\seed\mi-biblioteca.json
-   ```
-
-   (Cualquier nombre vale mientras termine en `.json`. No uses nombres que acaben en `.example.json`.)
-
-2. Reinicia solo la app para que cargue el archivo:
-
-   - Doble clic en `stop.bat`, luego en `start.bat`  
-   - O en PowerShell, desde la carpeta del proyecto:
-
-     ```powershell
-     docker compose restart alejandrisbn
-     ```
-
-3. Abre de nuevo [http://localhost:8000](http://localhost:8000) y comprueba que aparecen los libros.
-
-**Comportamiento:** el JSON **añade** libros que faltan; no pisa los que ya existen con el mismo ISBN (o el mismo id local). Si el mismo archivo ya se aplicó sin cambios, no se vuelve a importar; si editas el JSON o le cambias el nombre, sí se vuelve a procesar.
-
-**PC nuevo / base vacía:** clona el repo, pon el JSON en `seed/` **antes** (o justo después) del primer `start.bat`, y al arrancar se importará solo.
+**Comportamiento:** la importación **añade** libros que faltan; no pisa los que ya existen con el mismo ISBN (o el mismo id local).
 
 **Empezar de cero y cargar solo el JSON:** eso borra la base actual. Solo si lo tienes claro:
 
@@ -258,7 +238,7 @@ La app lee automáticamente los archivos de la carpeta `seed/` al arrancar.
 docker compose down -v
 ```
 
-Luego deja el JSON en `seed\` y ejecuta `start.bat`.
+Luego ejecuta `start.bat`, abre la UI e **Importar**.
 
 ---
 

@@ -39,7 +39,6 @@ if errorlevel 1 (
 
 set "ALEJANDRISBN_BACKEND=sqlite"
 set "DATABASE_URL="
-set "SEED_DIR=%CD%\seed"
 
 echo.
 echo Arrancando AlejandrISBN (SQLite, sin Docker)...
