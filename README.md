@@ -75,4 +75,4 @@ curl -X POST http://localhost:8000/api/books \
 
 ## Columnas
 
-`isbn`, `title`, `authors`, `publication_year`, `genre`, `publisher`, `cover_url`, `description`, `location`, `notes`, `favourite`, `source`, `created_at`, `updated_at`
+`isbn`, `title`, `authors`, `publication_year`, `genre`, `publisher`, `cover_url`, `description`, `location`, `notes`, `legal_deposit`, `favourite`, `source`, `created_at`, `updated_at`

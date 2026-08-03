@@ -27,9 +27,11 @@ const SORT_LABELS = {
   authors: "autor",
   publication_year: "año",
   isbn: "ISBN",
+  legal_deposit: "depósito legal",
   genre: "género",
   location: "ubicación",
   publisher: "editorial",
+  collection: "colección",
   notes: "notas",
 };
 
@@ -39,18 +41,163 @@ const GROUP_LABELS = {
   genre: "género",
   location: "ubicación",
   publisher: "editorial",
+  collection: "colección",
 };
 
-const COL_COUNT = 11;
+const COL_COUNT = 13;
 
 let books = [];
 let searchTimer = null;
 let pendingIsbn = "";
 let sortKey = "title";
 let sortDir = "asc";
-let groupBy = null;
-let suggestions = { authors: [], genre: [], location: [] };
+const VIEW_STATE_KEY = "alejandrisbn-view";
+
+/** @type {string[]} ordered group-by fields — all active at once (nested) */
+let groupByFields = [];
+/** @type {{ field: string, key: string, label: string }[]} facet filters — AND */
+let facetFilters = [];
+/** @type {Set<string>} collapsed group ids (`field\\0key`); expanded by default */
+let collapsedGroups = new Set();
+/** @type {string[]} committed search terms — OR across inventory fields */
+let searchTerms = [];
+let suggestions = { authors: [], genre: [], location: [], collection: [], translators: [] };
 let suggestionsLoadedAt = 0;
+
+function groupCollapseId(field, key) {
+  return `${field}\0${key}`;
+}
+
+function isGroupCollapsed(field, key) {
+  return collapsedGroups.has(groupCollapseId(field, key));
+}
+
+function toggleGroupCollapsed(field, key) {
+  const id = groupCollapseId(field, key);
+  if (collapsedGroups.has(id)) collapsedGroups.delete(id);
+  else collapsedGroups.add(id);
+  saveViewState();
+  renderList();
+}
+
+function loadViewState() {
+  try {
+    const raw = sessionStorage.getItem(VIEW_STATE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (Array.isArray(saved.groupByFields)) {
+      groupByFields = saved.groupByFields.filter((field) => GROUP_LABELS[field]);
+    }
+    if (Array.isArray(saved.facetFilters)) {
+      facetFilters = saved.facetFilters.filter(
+        (facet) =>
+          facet &&
+          GROUP_LABELS[facet.field] &&
+          typeof facet.key === "string" &&
+          typeof facet.label === "string",
+      );
+    }
+    if (Array.isArray(saved.collapsedGroups)) {
+      collapsedGroups = new Set(
+        saved.collapsedGroups.filter((id) => typeof id === "string" && id.includes("\0")),
+      );
+    }
+    if (Array.isArray(saved.searchTerms)) {
+      searchTerms = saved.searchTerms
+        .map((term) => String(term || "").trim())
+        .filter(Boolean)
+        .slice(0, 12);
+    }
+    if (saved.sortKey && SORT_LABELS[saved.sortKey]) {
+      sortKey = saved.sortKey;
+    }
+    if (saved.sortDir === "asc" || saved.sortDir === "desc") {
+      sortDir = saved.sortDir;
+    }
+  } catch {
+    /* ignore corrupt state */
+  }
+}
+
+function saveViewState() {
+  try {
+    sessionStorage.setItem(
+      VIEW_STATE_KEY,
+      JSON.stringify({
+        groupByFields,
+        facetFilters,
+        collapsedGroups: [...collapsedGroups],
+        searchTerms,
+        sortKey,
+        sortDir,
+      }),
+    );
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function normalizeSearchTerm(value) {
+  return String(value || "").trim();
+}
+
+function activeSearchTerms() {
+  const terms = [...searchTerms];
+  const draft = normalizeSearchTerm(searchInput?.value);
+  if (draft && !terms.some((term) => term.toLowerCase() === draft.toLowerCase())) {
+    terms.push(draft);
+  }
+  return terms;
+}
+
+function hasActiveSearch() {
+  return searchTerms.length > 0 || Boolean(normalizeSearchTerm(searchInput?.value));
+}
+
+function updateClearSearchVisibility() {
+  clearSearchBtn?.classList.toggle("hidden", !hasActiveSearch());
+}
+
+function commitSearchTerms(raw) {
+  const parts = String(raw || "")
+    .split(/[,;]+/)
+    .map(normalizeSearchTerm)
+    .filter(Boolean);
+  if (!parts.length) return false;
+  let changed = false;
+  for (const part of parts) {
+    if (!searchTerms.some((term) => term.toLowerCase() === part.toLowerCase())) {
+      searchTerms = [...searchTerms, part];
+      changed = true;
+    }
+  }
+  if (!changed) {
+    searchInput.value = "";
+    updateClearSearchVisibility();
+    return false;
+  }
+  searchInput.value = "";
+  saveViewState();
+  updateClearSearchVisibility();
+  loadBooks();
+  return true;
+}
+
+function removeSearchTerm(term) {
+  const target = String(term || "").toLowerCase();
+  searchTerms = searchTerms.filter((item) => item.toLowerCase() !== target);
+  saveViewState();
+  updateClearSearchVisibility();
+  loadBooks();
+}
+
+function clearSearch(reload = true) {
+  searchTerms = [];
+  if (searchInput) searchInput.value = "";
+  saveViewState();
+  updateClearSearchVisibility();
+  if (reload) loadBooks();
+}
 
 function setStatus(message, isError = false) {
   formStatus.textContent = message;
@@ -78,10 +225,110 @@ function detailMessage(text) {
     : text || "Error";
 }
 
+/** Ctrl/Cmd+Enter submits the form from any field (including textareas). */
+function wireCtrlEnterSubmit(form) {
+  if (!form) return;
+  form.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+    } else {
+      form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    }
+  });
+}
+
 function truncate(text, max = 36) {
   const value = String(text || "").trim();
   if (!value) return "—";
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+/** Fields stored as ``;``-separated labels (multi-value). */
+const MULTI_LABEL_FIELDS = new Set(["authors", "genre", "translators"]);
+
+function splitLabels(value) {
+  return String(value ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function joinLabels(labels) {
+  const seen = new Set();
+  const unique = [];
+  for (const raw of labels) {
+    const part = String(raw || "").trim();
+    if (!part) continue;
+    const key = part.toLocaleLowerCase("es");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(part);
+  }
+  return unique.join("; ");
+}
+
+function normalizeLabelField(value) {
+  return joinLabels(splitLabels(value));
+}
+
+function labelsHtml(value, empty = "—") {
+  const labels = splitLabels(value);
+  if (!labels.length) return empty;
+  return `<span class="field-labels">${labels
+    .map((label) => `<span class="field-label">${escapeHtml(label)}</span>`)
+    .join("")}</span>`;
+}
+
+function collectionDisplay(book) {
+  const name = String(book.collection || "").trim();
+  const volume = String(book.volume || "").trim();
+  if (!name && !volume) return "";
+  if (!name) return volume;
+  if (!volume) return name;
+  return `${name} · ${volume}`;
+}
+
+/** Advanced bibliographic fields — editor only, not shown in inventory table. */
+function originFieldsHtml(book = {}) {
+  return `
+    <details class="origin-panel">
+      <summary>Origen / traducción</summary>
+      <div class="origin-panel-body">
+        <label class="field">
+          <span>Título original</span>
+          <input name="original_title" type="text" value="${escapeHtml(book.original_title || "")}" placeholder="Título en la lengua original…" />
+        </label>
+        <div class="review-grid">
+          <label class="field">
+            <span>Año original</span>
+            <input name="original_year" type="number" min="1" max="2100" value="${escapeHtml(book.original_year ?? "")}" placeholder="Primera publicación" />
+          </label>
+          <label class="field">
+            <span>Traductor(es)</span>
+            <input name="translators" type="text" value="${escapeHtml(book.translators || "")}" placeholder="Apellido, Nombre; …" />
+          </label>
+        </div>
+        <p class="origin-hint">El año de arriba es el de <em>esta</em> edición; el original es la primera aparición de la obra.</p>
+      </div>
+    </details>
+  `;
+}
+
+function readOriginFields(data) {
+  const yearRaw = String(data.get("original_year") || "").trim();
+  const payload = {
+    original_title: String(data.get("original_title") || "").trim(),
+    translators: normalizeLabelField(data.get("translators")),
+  };
+  if (yearRaw) {
+    const year = Number(yearRaw);
+    if (!Number.isNaN(year)) payload.original_year = year;
+  } else {
+    payload.original_year = null;
+  }
+  return payload;
 }
 
 function isLocalId(isbn) {
@@ -90,9 +337,15 @@ function isLocalId(isbn) {
 
 function isbnCellHtml(book) {
   if (isLocalId(book.isbn)) {
-    return `<span class="no-isbn" title="${escapeHtml(book.isbn)}">sin ISBN</span>`;
+    return `<span class="no-isbn" title="${escapeHtml(book.isbn)}">—</span>`;
   }
   return `<code>${escapeHtml(book.isbn)}</code>`;
+}
+
+function legalDepositCellHtml(book) {
+  const value = String(book.legal_deposit || "").trim();
+  if (!value) return "—";
+  return `<span class="legal-deposit">${escapeHtml(value)}</span>`;
 }
 
 function compareValues(a, b) {
@@ -109,14 +362,34 @@ function compareValues(a, b) {
 function sortedBooks(list = books) {
   const copy = [...list];
   copy.sort((left, right) => {
-    const result = compareValues(left[sortKey], right[sortKey]);
+    let result;
+    if (sortKey === "collection") {
+      result = compareValues(left.collection || "", right.collection || "");
+      if (result === 0) {
+        result = compareValues(left.volume || "", right.volume || "");
+      }
+    } else {
+      const leftVal = MULTI_LABEL_FIELDS.has(sortKey)
+        ? splitLabels(left[sortKey])[0] || ""
+        : left[sortKey];
+      const rightVal = MULTI_LABEL_FIELDS.has(sortKey)
+        ? splitLabels(right[sortKey])[0] || ""
+        : right[sortKey];
+      result = compareValues(leftVal, rightVal);
+    }
     return sortDir === "asc" ? result : -result;
   });
   return copy;
 }
 
-function visibleBooks() {
-  return sortedBooks();
+function groupKey(value, field) {
+  if (field === "favourite") {
+    return value ? "1" : "0";
+  }
+  if (field === "publication_year") {
+    return value == null || value === "" ? "" : String(value);
+  }
+  return String(value ?? "").trim();
 }
 
 function groupLabel(value, field) {
@@ -130,8 +403,71 @@ function groupLabel(value, field) {
   return text || "Sin clasificar";
 }
 
-function setGroupBy(field) {
-  groupBy = groupBy === field ? null : field;
+/** One entry per group a book belongs to (multi-label fields expand). */
+function bookGroupEntries(book, field) {
+  if (MULTI_LABEL_FIELDS.has(field)) {
+    const labels = splitLabels(book[field]);
+    if (!labels.length) return [{ key: "", label: "Sin clasificar" }];
+    return labels.map((label) => ({ key: label, label }));
+  }
+  const key = groupKey(book[field], field);
+  return [{ key, label: groupLabel(book[field], field) }];
+}
+
+function bookMatchesFacets(book) {
+  return facetFilters.every((facet) => {
+    if (MULTI_LABEL_FIELDS.has(facet.field)) {
+      const labels = splitLabels(book[facet.field]);
+      if (!labels.length) return facet.key === "";
+      return labels.some((label) => label === facet.key);
+    }
+    return groupKey(book[facet.field], facet.field) === facet.key;
+  });
+}
+
+function visibleBooks() {
+  return sortedBooks(books.filter(bookMatchesFacets));
+}
+
+function toggleGroupBy(field) {
+  if (!GROUP_LABELS[field]) return;
+  const idx = groupByFields.indexOf(field);
+  if (idx >= 0) {
+    groupByFields = groupByFields.filter((item) => item !== field);
+  } else {
+    groupByFields = [...groupByFields, field];
+  }
+  saveViewState();
+  renderList();
+}
+
+function toggleFacetFilter(field, key, label) {
+  const existing = facetFilters.findIndex((facet) => facet.field === field && facet.key === key);
+  if (existing >= 0) {
+    facetFilters = facetFilters.filter((_, index) => index !== existing);
+  } else {
+    // One value per field; replace if same dimension already filtered
+    facetFilters = [...facetFilters.filter((facet) => facet.field !== field), { field, key, label }];
+  }
+  saveViewState();
+  renderList();
+}
+
+function clearGroupBy(field = null) {
+  groupByFields = field ? groupByFields.filter((item) => item !== field) : [];
+  saveViewState();
+  renderList();
+}
+
+function clearFacetFilter(field = null, key = null) {
+  if (!field) {
+    facetFilters = [];
+  } else if (key == null) {
+    facetFilters = facetFilters.filter((facet) => facet.field !== field);
+  } else {
+    facetFilters = facetFilters.filter((facet) => !(facet.field === field && facet.key === key));
+  }
+  saveViewState();
   renderList();
 }
 
@@ -152,7 +488,7 @@ function updateSortButtons() {
 
 function updateGroupToggles() {
   groupToggles.forEach((btn) => {
-    const active = btn.dataset.group === groupBy;
+    const active = groupByFields.includes(btn.dataset.group);
     btn.classList.toggle("is-on", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
     const th = btn.closest("th");
@@ -162,19 +498,94 @@ function updateGroupToggles() {
 
 function updateViewChips() {
   if (!viewChips) return;
-  if (!groupBy) {
+  const hasGroups = groupByFields.length > 0;
+  const hasFacets = facetFilters.length > 0;
+  const hasSearch = searchTerms.length > 0;
+  if (!hasGroups && !hasFacets && !hasSearch) {
     viewChips.hidden = true;
     viewChips.innerHTML = "";
     return;
   }
-  const label = GROUP_LABELS[groupBy] || groupBy;
+
+  const searchChips = searchTerms
+    .map(
+      (term) => `
+        <span class="view-chip view-chip-search">
+          <strong>${escapeHtml(term)}</strong>
+          <button
+            type="button"
+            class="chip-clear"
+            data-clear-search-term="${escapeHtml(term)}"
+            aria-label="Quitar término ${escapeHtml(term)}"
+          >×</button>
+        </span>
+      `,
+    )
+    .join("");
+
+  const searchCluster = hasSearch
+    ? `<div class="view-chip-cluster" role="group" aria-label="Búsqueda">
+        <span class="view-chip-legend">Buscar</span>
+        ${searchChips}
+      </div>`
+    : "";
+
+  const groupChips = groupByFields
+    .map((field, index) => {
+      const label = GROUP_LABELS[field] || field;
+      const order =
+        groupByFields.length > 1
+          ? `<span class="chip-ord" aria-hidden="true">${index + 1}</span>`
+          : "";
+      return `
+        <span class="view-chip view-chip-group">
+          ${order}<strong>${escapeHtml(label)}</strong>
+          <button type="button" class="chip-clear" data-clear-group="${escapeHtml(field)}" aria-label="Quitar agrupación por ${escapeHtml(label)}">×</button>
+        </span>
+      `;
+    })
+    .join("");
+
+  const groupCluster = hasGroups
+    ? `<div class="view-chip-cluster" role="group" aria-label="Agrupación">
+        <span class="view-chip-legend">Agrupado</span>
+        ${groupChips}
+      </div>`
+    : "";
+
+  const facetChips = facetFilters
+    .map(
+      (facet) => `
+        <span class="view-chip view-chip-filter">
+          <span class="chip-dim">${escapeHtml(GROUP_LABELS[facet.field] || facet.field)}</span>
+          <strong>${escapeHtml(facet.label)}</strong>
+          <button
+            type="button"
+            class="chip-clear"
+            data-clear-facet
+            data-field="${escapeHtml(facet.field)}"
+            data-key="${escapeHtml(facet.key)}"
+            aria-label="Quitar filtro ${escapeHtml(facet.label)}"
+          >×</button>
+        </span>
+      `,
+    )
+    .join("");
+
+  const facetCluster = hasFacets
+    ? `<div class="view-chip-cluster" role="group" aria-label="Filtros">
+        <span class="view-chip-legend">Filtros</span>
+        ${facetChips}
+      </div>`
+    : "";
+
+  const clearAll =
+    hasGroups || hasFacets || hasSearch
+      ? `<button type="button" class="view-chip view-chip-clear-all" data-clear-view>Limpiar vista</button>`
+      : "";
+
   viewChips.hidden = false;
-  viewChips.innerHTML = `
-    <span class="view-chip">
-      Agrupado por <strong>${escapeHtml(label)}</strong>
-      <button type="button" class="chip-clear" data-clear-group aria-label="Quitar agrupación">×</button>
-    </span>
-  `;
+  viewChips.innerHTML = `${searchCluster}${groupCluster}${facetCluster}${clearAll}`;
 }
 
 function findBook(isbn) {
@@ -200,12 +611,14 @@ function bookRowHtml(book) {
         ${escapeHtml(book.title)}
       </button>
     </td>
-    <td title="${escapeHtml(book.authors || "")}">${escapeHtml(truncate(book.authors || "—", 28))}</td>
+    <td class="col-authors">${labelsHtml(book.authors)}</td>
     <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
     <td class="col-isbn">${isbnCellHtml(book)}</td>
-    <td title="${escapeHtml(book.genre || "")}">${escapeHtml(truncate(book.genre, 28))}</td>
+    <td class="col-dl">${legalDepositCellHtml(book)}</td>
+    <td class="col-genre">${labelsHtml(book.genre)}</td>
     <td class="col-location">${escapeHtml(book.location || "—")}</td>
     <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
+    <td class="col-collection" title="${escapeHtml(collectionDisplay(book))}">${escapeHtml(truncate(collectionDisplay(book) || "—", 28))}</td>
     <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
     <td class="col-actions">
       <button type="button" class="btn ghost compact" data-open="${escapeHtml(book.isbn)}">Ver</button>
@@ -214,13 +627,37 @@ function bookRowHtml(book) {
   `;
 }
 
-function appendGroupHeader(label, count) {
+function appendGroupHeader({ field, key, label, count, depth, filtered, collapsed }) {
   const tr = document.createElement("tr");
-  tr.className = "group-row";
+  tr.className = `group-row depth-${Math.min(depth, 4)}${filtered ? " is-filtered" : ""}${
+    collapsed ? " is-collapsed" : ""
+  }`;
   tr.innerHTML = `
     <td colspan="${COL_COUNT}">
-      <span class="group-label">${escapeHtml(label)}</span>
-      <span class="group-count">${count}</span>
+      <div class="group-heading">
+        <button
+          type="button"
+          class="group-collapse-btn"
+          data-collapse-field="${escapeHtml(field)}"
+          data-collapse-key="${escapeHtml(key)}"
+          aria-expanded="${collapsed ? "false" : "true"}"
+          title="${collapsed ? "Expandir grupo" : "Plegar grupo"}"
+          aria-label="${collapsed ? "Expandir" : "Plegar"} ${escapeHtml(label)}"
+        >${collapsed ? "▸" : "▾"}</button>
+        <button
+          type="button"
+          class="group-filter-btn"
+          data-facet-field="${escapeHtml(field)}"
+          data-facet-key="${escapeHtml(key)}"
+          data-facet-label="${escapeHtml(label)}"
+          aria-pressed="${filtered ? "true" : "false"}"
+          title="${filtered ? "Quitar filtro" : "Filtrar por este grupo (se combina con los demás)"}"
+        >
+          <span class="group-label">${escapeHtml(label)}</span>
+          <span class="group-count">${count}</span>
+          <span class="group-filter-hint">${filtered ? "filtro activo" : "filtrar"}</span>
+        </button>
+      </div>
     </td>
   `;
   bookTbody.appendChild(tr);
@@ -232,25 +669,57 @@ function appendBookRow(book) {
   bookTbody.appendChild(tr);
 }
 
-function renderGrouped(rows, field) {
+function partitionByField(rows, field) {
   const groups = new Map();
   rows.forEach((book) => {
-    const key = groupLabel(book[field], field);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(book);
+    bookGroupEntries(book, field).forEach(({ key, label }) => {
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          label,
+          items: [],
+        });
+      }
+      groups.get(key).items.push(book);
+    });
   });
 
-  let keys = [...groups.keys()];
+  let entries = [...groups.values()];
   if (field === "favourite") {
-    keys = ["Favoritos", "Otros"].filter((key) => groups.has(key));
+    const order = ["1", "0"];
+    entries.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
   } else {
-    keys.sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base", numeric: true }));
+    entries.sort((a, b) =>
+      a.label.localeCompare(b.label, "es", { sensitivity: "base", numeric: true }),
+    );
+  }
+  return entries;
+}
+
+function renderGrouped(rows, fields, depth = 0) {
+  if (!fields.length) {
+    rows.forEach(appendBookRow);
+    return;
   }
 
-  keys.forEach((key) => {
-    const items = groups.get(key);
-    appendGroupHeader(key, items.length);
-    items.forEach(appendBookRow);
+  const [field, ...rest] = fields;
+  partitionByField(rows, field).forEach((group) => {
+    const filtered = facetFilters.some(
+      (facet) => facet.field === field && facet.key === group.key,
+    );
+    const collapsed = isGroupCollapsed(field, group.key);
+    appendGroupHeader({
+      field,
+      key: group.key,
+      label: group.label,
+      count: group.items.length,
+      depth,
+      filtered,
+      collapsed,
+    });
+    if (!collapsed) {
+      renderGrouped(group.items, rest, depth + 1);
+    }
   });
 }
 
@@ -259,20 +728,30 @@ function renderList() {
   bookTbody.innerHTML = "";
   emptyState.classList.toggle("hidden", rows.length > 0);
 
-  const q = searchInput.value.trim();
-  clearSearchBtn.classList.toggle("hidden", !q);
+  updateClearSearchVisibility();
 
+  const terms = activeSearchTerms();
   const sortHint = `orden: ${SORT_LABELS[sortKey]} ${sortDir === "asc" ? "A→Z" : "Z→A"}`;
-  listMeta.textContent = q
-    ? `${rows.length} resultado${rows.length === 1 ? "" : "s"} para “${q}” · ${sortHint}`
-    : `${rows.length} libro${rows.length === 1 ? "" : "s"} · ${sortHint}`;
+  const filterHint = facetFilters.length
+    ? ` · ${facetFilters.length} filtro${facetFilters.length === 1 ? "" : "s"}`
+    : "";
+  const groupHint = groupByFields.length
+    ? ` · agrupado: ${groupByFields.map((field) => GROUP_LABELS[field] || field).join(" → ")}`
+    : "";
+  const searchHint = terms.length
+    ? ` · buscar: ${terms.map((term) => `“${term}”`).join(" | ")}`
+    : "";
+  listMeta.textContent = terms.length
+    ? `${rows.length} resultado${rows.length === 1 ? "" : "s"}${searchHint} · ${sortHint}${filterHint}${groupHint}`
+    : `${rows.length} libro${rows.length === 1 ? "" : "s"} · ${sortHint}${filterHint}${groupHint}`;
 
   updateSortButtons();
   updateGroupToggles();
   updateViewChips();
 
-  if (groupBy && GROUP_LABELS[groupBy]) {
-    renderGrouped(rows, groupBy);
+  const activeGroups = groupByFields.filter((field) => GROUP_LABELS[field]);
+  if (activeGroups.length) {
+    renderGrouped(rows, activeGroups);
     return;
   }
 
@@ -307,7 +786,7 @@ async function deleteBook(isbn, title) {
   }
   setStatus("Libro eliminado.");
   suggestionsLoadedAt = 0;
-  await loadBooks(searchInput.value.trim());
+  await loadBooks();
   return true;
 }
 
@@ -325,15 +804,19 @@ async function loadSuggestions(force = false) {
   return suggestions;
 }
 
-function filterSuggestions(items, query) {
+function filterSuggestions(items, query, { exclude = [] } = {}) {
   const q = String(query || "").trim().toLowerCase();
-  if (!q) return items.slice(0, 12);
+  const excluded = new Set(exclude.map((item) => String(item).toLowerCase()));
   return items
-    .filter((item) => item.value.toLowerCase().includes(q))
+    .filter((item) => {
+      const value = item.value.toLowerCase();
+      if (excluded.has(value)) return false;
+      return !q || value.includes(q);
+    })
     .slice(0, 12);
 }
 
-function attachSuggest(input, items, { showCount = false } = {}) {
+function attachSuggest(input, items, { showCount = false, multiLabel = false } = {}) {
   if (!input) return;
   const wrap = document.createElement("div");
   wrap.className = "suggest-field";
@@ -358,8 +841,27 @@ function attachSuggest(input, items, { showCount = false } = {}) {
     visible = [];
   }
 
+  function segmentState() {
+    if (!multiLabel) {
+      return { prefix: "", query: input.value, used: [] };
+    }
+    const raw = input.value;
+    const lastSep = raw.lastIndexOf(";");
+    if (lastSep < 0) {
+      return { prefix: "", query: raw, used: [] };
+    }
+    const prefix = raw.slice(0, lastSep);
+    const query = raw.slice(lastSep + 1);
+    return {
+      prefix,
+      query,
+      used: splitLabels(prefix),
+    };
+  }
+
   function render() {
-    visible = filterSuggestions(items, input.value);
+    const { query, used } = segmentState();
+    visible = filterSuggestions(items, query, { exclude: used });
     if (!visible.length) {
       close();
       return;
@@ -392,7 +894,12 @@ function attachSuggest(input, items, { showCount = false } = {}) {
   function pick(index) {
     const item = visible[index];
     if (!item) return;
-    input.value = item.value;
+    if (multiLabel) {
+      const { used } = segmentState();
+      input.value = joinLabels([...used, item.value]);
+    } else {
+      input.value = item.value;
+    }
     close();
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
@@ -442,12 +949,21 @@ async function wireFieldSuggestions(root) {
   const data = await loadSuggestions();
   attachSuggest(root.querySelector('input[name="authors"]'), data.authors || [], {
     showCount: true,
+    multiLabel: true,
   });
   attachSuggest(root.querySelector('input[name="genre"]'), data.genre || [], {
     showCount: true,
+    multiLabel: true,
   });
   attachSuggest(root.querySelector('input[name="location"]'), data.location || [], {
     showCount: true,
+  });
+  attachSuggest(root.querySelector('input[name="collection"]'), data.collection || [], {
+    showCount: true,
+  });
+  attachSuggest(root.querySelector('input[name="translators"]'), data.translators || [], {
+    showCount: true,
+    multiLabel: true,
   });
 }
 
@@ -469,7 +985,7 @@ function openReview(isbn, meta) {
           </label>
           <label class="field">
             <span>Autor(es)</span>
-            <input name="authors" type="text" value="${escapeHtml(meta.authors || "")}" />
+            <input name="authors" type="text" value="${escapeHtml(meta.authors || "")}" placeholder="Apellido, Nombre; Otro autor…" />
           </label>
           <div class="review-grid">
             <label class="field">
@@ -482,12 +998,20 @@ function openReview(isbn, meta) {
             </label>
           </div>
           <label class="field">
-            <span>Género</span>
-            <input name="genre" type="text" value="${escapeHtml(meta.genre || "")}" placeholder="Novela, ensayo, poesía…" />
+            <span>Género(s)</span>
+            <input name="genre" type="text" value="${escapeHtml(meta.genre || "")}" placeholder="Novela; Ensayo; Poesía…" />
           </label>
           <label class="field">
             <span>Ubicación</span>
             <input name="location" type="text" placeholder="A1, B2, Estantería norte…" autofocus />
+          </label>
+          <label class="field">
+            <span>Colección</span>
+            <input name="collection" type="text" placeholder="Opcional — serie, colección editorial…" />
+          </label>
+          <label class="field">
+            <span>Volumen / nº</span>
+            <input name="volume" type="text" placeholder="8, II, tomo 3…" />
           </label>
           <label class="field">
             <span>Notas</span>
@@ -497,6 +1021,7 @@ function openReview(isbn, meta) {
             <span>Descripción</span>
             <textarea name="description" rows="3">${escapeHtml(meta.description || "")}</textarea>
           </label>
+          ${originFieldsHtml(meta)}
           <label class="checkbox-row">
             <input name="favourite" type="checkbox" />
             <span>Marcar como favorito</span>
@@ -522,6 +1047,8 @@ function openReview(isbn, meta) {
     setStatus("Alta cancelada.");
   });
 
+  wireCtrlEnterSubmit(form);
+
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(form);
@@ -529,14 +1056,17 @@ function openReview(isbn, meta) {
     const payload = {
       isbn: pendingIsbn,
       title: String(data.get("title") || "").trim(),
-      authors: String(data.get("authors") || "").trim(),
-      genre: String(data.get("genre") || "").trim(),
+      authors: normalizeLabelField(data.get("authors")),
+      genre: normalizeLabelField(data.get("genre")),
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
+      collection: String(data.get("collection") || "").trim(),
+      volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       description: String(data.get("description") || "").trim(),
       cover_url: String(data.get("cover_url") || "").trim(),
       favourite: data.get("favourite") === "on",
+      ...readOriginFields(data),
     };
     if (yearRaw) payload.publication_year = Number(yearRaw);
 
@@ -559,7 +1089,7 @@ function openReview(isbn, meta) {
       reviewDialog.close();
       isbnInput.value = "";
       setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
-      searchInput.value = "";
+      clearSearch(false);
       sortKey = "title";
       sortDir = "asc";
       suggestionsLoadedAt = 0;
@@ -585,8 +1115,8 @@ function openManual() {
       <div class="detail-cover placeholder" aria-hidden="true">§</div>
       <div>
         <p class="review-kicker">Alta manual · sin ISBN</p>
-        <h3 class="review-title">Revista, manual o documento</h3>
-        <p class="authors">Rellena al menos el título. Se guardará un id interno automático.</p>
+        <h3 class="review-title">Libro, revista, manual o documento</h3>
+        <p class="authors">Ideal para ediciones con depósito legal u obras sin ISBN. Título obligatorio.</p>
 
         <form id="review-form" class="review-form">
           <label class="field">
@@ -594,8 +1124,12 @@ function openManual() {
             <input name="title" type="text" required autofocus placeholder="Nombre del ítem" />
           </label>
           <label class="field">
-            <span>Autor(es) / editorial</span>
-            <input name="authors" type="text" placeholder="Opcional" />
+            <span>Autor(es)</span>
+            <input name="authors" type="text" placeholder="Apellido, Nombre; Otro autor…" />
+          </label>
+          <label class="field">
+            <span>Depósito legal</span>
+            <input name="legal_deposit" type="text" placeholder="B. 7528-1969" />
           </label>
           <div class="review-grid">
             <label class="field">
@@ -603,26 +1137,35 @@ function openManual() {
               <input name="publication_year" type="number" min="1000" max="2100" />
             </label>
             <label class="field">
-              <span>Editorial / origen</span>
+              <span>Editorial</span>
               <input name="publisher" type="text" />
             </label>
           </div>
           <label class="field">
-            <span>Género / tipo</span>
-            <input name="genre" type="text" placeholder="Revista, manual, documento…" />
+            <span>Género(s)</span>
+            <input name="genre" type="text" placeholder="Teatro; Revista; Manual…" />
           </label>
           <label class="field">
             <span>Ubicación</span>
             <input name="location" type="text" placeholder="A1, B2, Estantería norte…" />
           </label>
           <label class="field">
+            <span>Colección</span>
+            <input name="collection" type="text" placeholder="Opcional — serie, colección editorial…" />
+          </label>
+          <label class="field">
+            <span>Volumen / nº</span>
+            <input name="volume" type="text" placeholder="8, II, tomo 3…" />
+          </label>
+          <label class="field">
             <span>Notas</span>
-            <input name="notes" type="text" placeholder="Volumen, fecha, préstamo…" />
+            <input name="notes" type="text" placeholder="Estado, préstamo…" />
           </label>
           <label class="field">
             <span>Descripción</span>
             <textarea name="description" rows="3"></textarea>
           </label>
+          ${originFieldsHtml()}
           <label class="checkbox-row">
             <input name="favourite" type="checkbox" />
             <span>Marcar como favorito</span>
@@ -647,19 +1190,25 @@ function openManual() {
     setStatus("Alta cancelada.");
   });
 
+  wireCtrlEnterSubmit(form);
+
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(form);
     const yearRaw = String(data.get("publication_year") || "").trim();
     const payload = {
       title: String(data.get("title") || "").trim(),
-      authors: String(data.get("authors") || "").trim(),
-      genre: String(data.get("genre") || "").trim(),
+      authors: normalizeLabelField(data.get("authors")),
+      legal_deposit: String(data.get("legal_deposit") || "").trim(),
+      genre: normalizeLabelField(data.get("genre")),
       publisher: String(data.get("publisher") || "").trim(),
       location: String(data.get("location") || "").trim(),
+      collection: String(data.get("collection") || "").trim(),
+      volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       description: String(data.get("description") || "").trim(),
       favourite: data.get("favourite") === "on",
+      ...readOriginFields(data),
     };
     if (yearRaw) payload.publication_year = Number(yearRaw);
 
@@ -681,7 +1230,7 @@ function openManual() {
       }
       reviewDialog.close();
       setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
-      searchInput.value = "";
+      clearSearch(false);
       sortKey = "title";
       sortDir = "asc";
       suggestionsLoadedAt = 0;
@@ -705,9 +1254,25 @@ function openDetail(book) {
     <div class="detail-layout">
       ${coverHtml(book, "detail-cover")}
       <div>
-        <h3>${escapeHtml(book.title)}</h3>
-        <p class="authors">${escapeHtml(book.authors || "Autor desconocido")}</p>
         <form id="detail-form" class="review-form">
+          <label class="field">
+            <span>Título</span>
+            <input name="title" type="text" value="${escapeHtml(book.title || "")}" required />
+          </label>
+          <label class="field">
+            <span>Autor(es)</span>
+            <input name="authors" type="text" value="${escapeHtml(book.authors || "")}" placeholder="Apellido, Nombre; Otro autor…" />
+          </label>
+          <div class="review-grid">
+            <label class="field">
+              <span>Año (edición)</span>
+              <input name="publication_year" type="number" min="1000" max="2100" value="${escapeHtml(book.publication_year ?? "")}" />
+            </label>
+            <label class="field">
+              <span>Editorial</span>
+              <input name="publisher" type="text" value="${escapeHtml(book.publisher || "")}" />
+            </label>
+          </div>
           <dl class="detail-grid detail-grid-2">
             <div>
               <dt>ISBN</dt>
@@ -717,22 +1282,35 @@ function openDetail(book) {
                   : escapeHtml(book.isbn)
               }</dd>
             </div>
-            <div><dt>Año</dt><dd>${escapeHtml(book.publication_year ?? "—")}</dd></div>
-            <div><dt>Editorial</dt><dd>${escapeHtml(book.publisher || "—")}</dd></div>
             <div><dt>Fuente</dt><dd>${escapeHtml(book.source || "—")}</dd></div>
           </dl>
           <label class="field">
-            <span>Género</span>
-            <input name="genre" type="text" value="${escapeHtml(book.genre || "")}" />
+            <span>Depósito legal</span>
+            <input name="legal_deposit" type="text" value="${escapeHtml(book.legal_deposit || "")}" placeholder="B. 7528-1969" />
+          </label>
+          <label class="field">
+            <span>Género(s)</span>
+            <input name="genre" type="text" value="${escapeHtml(book.genre || "")}" placeholder="Novela; Ensayo…" />
           </label>
           <label class="field">
             <span>Ubicación</span>
             <input name="location" type="text" value="${escapeHtml(book.location || "")}" placeholder="A1, B2…" />
           </label>
+          <div class="review-grid">
+            <label class="field">
+              <span>Colección</span>
+              <input name="collection" type="text" value="${escapeHtml(book.collection || "")}" placeholder="Grandes genios…" />
+            </label>
+            <label class="field">
+              <span>Volumen / nº</span>
+              <input name="volume" type="text" value="${escapeHtml(book.volume || "")}" placeholder="8, II…" />
+            </label>
+          </div>
           <label class="field">
             <span>Notas</span>
             <textarea name="notes" rows="2">${escapeHtml(book.notes || "")}</textarea>
           </label>
+          ${originFieldsHtml(book)}
           <label class="checkbox-row">
             <input name="favourite" type="checkbox" ${book.favourite ? "checked" : ""} />
             <span>Favorito</span>
@@ -743,7 +1321,7 @@ function openDetail(book) {
               : ""
           }
           <div class="detail-actions">
-            <button type="submit" class="btn primary compact">Guardar cambios</button>
+            <button type="submit" class="btn primary compact" title="Ctrl+Enter">Guardar cambios</button>
             <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.isbn)}">Eliminar</button>
           </div>
           <p id="detail-status" class="status" role="status"></p>
@@ -753,15 +1331,37 @@ function openDetail(book) {
   `;
 
   const detailStatus = detailBody.querySelector("#detail-status");
-  detailBody.querySelector("#detail-form")?.addEventListener("submit", async (event) => {
+  const detailForm = detailBody.querySelector("#detail-form");
+  wireCtrlEnterSubmit(detailForm);
+  detailForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const title = String(data.get("title") || "").trim();
+    if (!title) {
+      detailStatus.textContent = "El título no puede quedar vacío.";
+      detailStatus.classList.add("error");
+      return;
+    }
+    const yearRaw = String(data.get("publication_year") || "").trim();
     const payload = {
-      genre: String(data.get("genre") || "").trim(),
+      title,
+      authors: normalizeLabelField(data.get("authors")),
+      publisher: String(data.get("publisher") || "").trim(),
+      publication_year: yearRaw ? Number(yearRaw) : null,
+      legal_deposit: String(data.get("legal_deposit") || "").trim(),
+      genre: normalizeLabelField(data.get("genre")),
       location: String(data.get("location") || "").trim(),
+      collection: String(data.get("collection") || "").trim(),
+      volume: String(data.get("volume") || "").trim(),
       notes: String(data.get("notes") || "").trim(),
       favourite: data.get("favourite") === "on",
+      ...readOriginFields(data),
     };
+    if (yearRaw && Number.isNaN(payload.publication_year)) {
+      detailStatus.textContent = "El año no es válido.";
+      detailStatus.classList.add("error");
+      return;
+    }
     const res = await fetch(`/api/books/${encodeURIComponent(book.isbn)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -775,10 +1375,11 @@ function openDetail(book) {
     const updated = await res.json();
     const idx = books.findIndex((item) => item.isbn === book.isbn);
     if (idx >= 0) books[idx] = updated;
-    detailStatus.textContent = "Cambios guardados.";
-    detailStatus.classList.remove("error");
+    Object.assign(book, updated);
     suggestionsLoadedAt = 0;
     renderList();
+    detailDialog.close();
+    setStatus(`Guardado: ${updated.title}`);
   });
 
   detailBody.querySelector("[data-delete]")?.addEventListener("click", async () => {
@@ -790,9 +1391,11 @@ function openDetail(book) {
   wireFieldSuggestions(detailBody);
 }
 
-async function loadBooks(q = "") {
+async function loadBooks() {
   const params = new URLSearchParams({ limit: "200" });
-  if (q) params.set("q", q);
+  for (const term of activeSearchTerms()) {
+    params.append("q", term);
+  }
   const res = await fetch(`/api/books?${params}`);
   if (!res.ok) {
     setStatus("Error al cargar el inventario.", true);
@@ -803,6 +1406,25 @@ async function loadBooks(q = "") {
 }
 
 bookTbody.addEventListener("click", async (event) => {
+  const collapseBtn = event.target.closest("[data-collapse-field]");
+  if (collapseBtn) {
+    toggleGroupCollapsed(
+      collapseBtn.getAttribute("data-collapse-field"),
+      collapseBtn.getAttribute("data-collapse-key"),
+    );
+    return;
+  }
+
+  const facetBtn = event.target.closest("[data-facet-field]");
+  if (facetBtn) {
+    toggleFacetFilter(
+      facetBtn.getAttribute("data-facet-field"),
+      facetBtn.getAttribute("data-facet-key"),
+      facetBtn.getAttribute("data-facet-label"),
+    );
+    return;
+  }
+
   const favBtn = event.target.closest("[data-fav-toggle]");
   if (favBtn) {
     await toggleFavourite(favBtn.getAttribute("data-fav-toggle"));
@@ -830,20 +1452,43 @@ sortButtons.forEach((btn) => {
       sortKey = key;
       sortDir = key === "favourite" ? "desc" : "asc";
     }
+    saveViewState();
     renderList();
   });
 });
 
 groupToggles.forEach((btn) => {
   btn.addEventListener("click", () => {
-    setGroupBy(btn.dataset.group);
+    toggleGroupBy(btn.dataset.group);
   });
 });
 
 viewChips?.addEventListener("click", (event) => {
-  if (event.target.closest("[data-clear-group]")) {
-    groupBy = null;
-    renderList();
+  if (event.target.closest("[data-clear-view]")) {
+    groupByFields = [];
+    facetFilters = [];
+    collapsedGroups = new Set();
+    clearSearch(false);
+    saveViewState();
+    loadBooks();
+    return;
+  }
+  const clearSearchTerm = event.target.closest("[data-clear-search-term]");
+  if (clearSearchTerm) {
+    removeSearchTerm(clearSearchTerm.getAttribute("data-clear-search-term"));
+    return;
+  }
+  const clearGroup = event.target.closest("[data-clear-group]");
+  if (clearGroup) {
+    clearGroupBy(clearGroup.getAttribute("data-clear-group"));
+    return;
+  }
+  const clearFacet = event.target.closest("[data-clear-facet]");
+  if (clearFacet) {
+    clearFacetFilter(
+      clearFacet.getAttribute("data-field"),
+      clearFacet.getAttribute("data-key"),
+    );
   }
 });
 
@@ -887,16 +1532,24 @@ manualBtn?.addEventListener("click", () => {
 
 searchInput.addEventListener("input", () => {
   clearTimeout(searchTimer);
-  clearSearchBtn.classList.toggle("hidden", !searchInput.value.trim());
+  updateClearSearchVisibility();
   searchTimer = setTimeout(() => {
-    loadBooks(searchInput.value.trim());
+    loadBooks();
   }, 250);
 });
 
+searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    clearTimeout(searchTimer);
+    commitSearchTerms(searchInput.value);
+  } else if (event.key === "Backspace" && !searchInput.value && searchTerms.length) {
+    removeSearchTerm(searchTerms[searchTerms.length - 1]);
+  }
+});
+
 clearSearchBtn.addEventListener("click", () => {
-  searchInput.value = "";
-  clearSearchBtn.classList.add("hidden");
-  loadBooks();
+  clearSearch();
 });
 
 async function exportInventory(format) {
@@ -950,4 +1603,34 @@ detailClose.addEventListener("click", () => detailDialog.close());
 closeOnBackdrop(reviewDialog);
 closeOnBackdrop(detailDialog);
 
+const themeToggle = document.getElementById("theme-toggle");
+const THEME_KEY = "alejandrisbn-theme";
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    /* ignore */
+  }
+  if (themeToggle) {
+    themeToggle.setAttribute(
+      "aria-label",
+      next === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro",
+    );
+    themeToggle.title = next === "dark" ? "Modo claro" : "Modo oscuro";
+  }
+}
+
+themeToggle?.addEventListener("click", () => {
+  applyTheme(currentTheme() === "dark" ? "light" : "dark");
+});
+
+applyTheme(currentTheme());
+loadViewState();
 loadBooks();

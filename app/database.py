@@ -50,6 +50,7 @@ async def init_db() -> None:
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS books (
@@ -83,6 +84,42 @@ async def init_db() -> None:
             )
             await conn.execute(
                 """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS legal_deposit TEXT NOT NULL DEFAULT ''
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS collection TEXT NOT NULL DEFAULT ''
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS volume TEXT NOT NULL DEFAULT ''
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS original_year INTEGER
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS translators TEXT NOT NULL DEFAULT ''
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE books
+                ADD COLUMN IF NOT EXISTS original_title TEXT NOT NULL DEFAULT ''
+                """
+            )
+            await conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_books_title
                 ON books (lower(title))
                 """
@@ -109,6 +146,24 @@ async def init_db() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_books_favourite
                 ON books (favourite)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_books_legal_deposit
+                ON books (lower(legal_deposit))
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_books_collection
+                ON books (lower(collection))
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_books_volume
+                ON books (lower(volume))
                 """
             )
 
