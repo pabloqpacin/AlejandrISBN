@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
-from app.schemas import is_local_id
+from app.schemas import is_local_id, is_print_media
 
 logger = logging.getLogger("alejandrisbn.enrich")
 
@@ -39,29 +39,36 @@ def _is_blank(value: Any) -> bool:
     return False
 
 
-def field_is_empty(book: dict[str, Any], field: str) -> bool:
-    value = book.get(field)
+def field_is_empty(item: dict[str, Any], field: str) -> bool:
+    value = item.get(field)
     if field == "title":
         text = str(value or "").strip()
-        isbn = str(book.get("isbn") or "").strip()
+        isbn = str(item.get("isbn") or "").strip()
         # Import CSV may stash the ISBN as a placeholder title.
-        return not text or text.upper() == isbn.upper()
+        return not text or (isbn and text.upper() == isbn.upper())
     return _is_blank(value)
 
 
-def book_needs_enrichment(book: dict[str, Any]) -> bool:
-    if is_local_id(str(book.get("isbn") or "")):
+def item_needs_enrichment(item: dict[str, Any]) -> bool:
+    isbn = str(item.get("isbn") or "").strip()
+    if not isbn or is_local_id(isbn):
         return False
-    return any(field_is_empty(book, field) for field in ENRICHABLE_FIELDS)
+    if not is_print_media(item.get("media_type") or "book"):
+        return False
+    return any(field_is_empty(item, field) for field in ENRICHABLE_FIELDS)
+
+
+# Back-compat names
+book_needs_enrichment = item_needs_enrichment
 
 
 def suggested_fills(
-    book: dict[str, Any],
+    item: dict[str, Any],
     meta: dict[str, Any],
     *,
     fill_empty_only: bool = True,
 ) -> list[dict[str, Any]]:
-    """Diff current book vs lookup metadata."""
+    """Diff current item vs lookup metadata."""
     fields: list[dict[str, Any]] = []
     for name in ENRICHABLE_FIELDS:
         suggested = meta.get(name)
@@ -71,13 +78,13 @@ def suggested_fills(
             suggested = suggested.strip()
             if not suggested:
                 continue
-        current = book.get(name)
+        current = item.get(name)
         if isinstance(current, str):
             current_out: Any = current
         else:
             current_out = current
 
-        empty = field_is_empty(book, name)
+        empty = field_is_empty(item, name)
         if fill_empty_only and not empty:
             continue
         if not fill_empty_only and current_out == suggested:
@@ -94,66 +101,85 @@ def suggested_fills(
     return fields
 
 
-async def select_candidate_isbns(
+async def select_candidate_items(
     db: Any,
     *,
-    isbns: Optional[list[str]] = None,
+    ids: Optional[list[str]] = None,
     limit: Optional[int] = None,
 ) -> list[dict[str, Any]]:
-    """Load inventory rows eligible for enrichment.
-
-    ``limit`` is optional; ``None`` means process the full candidate set.
-    """
+    """Load inventory rows eligible for enrichment."""
     from app.db.common import record_to_dict
 
     capped = max(1, int(limit)) if limit is not None else None
 
-    if isbns:
-        books: list[dict[str, Any]] = []
-        for raw in isbns:
+    if ids:
+        items: list[dict[str, Any]] = []
+        for raw in ids:
             key = str(raw or "").strip()
-            if not key or is_local_id(key):
+            if not key:
                 continue
-            row = await db.fetchrow("SELECT * FROM books WHERE isbn = $1", key)
+            row = await db.fetchrow("SELECT * FROM items WHERE id = $1", key)
             if row:
-                books.append(record_to_dict(row))
-            if capped is not None and len(books) >= capped:
+                item = record_to_dict(row)
+                if item_needs_enrichment(item):
+                    items.append(item)
+            if capped is not None and len(items) >= capped:
                 break
-        return books
+        return items
 
     rows = await db.fetch(
         """
-        SELECT * FROM books
+        SELECT * FROM items
+        WHERE isbn IS NOT NULL AND TRIM(isbn) <> ''
         ORDER BY updated_at DESC
         """
     )
     candidates: list[dict[str, Any]] = []
     for row in rows:
-        book = record_to_dict(row)
-        if book_needs_enrichment(book):
-            candidates.append(book)
+        item = record_to_dict(row)
+        if item_needs_enrichment(item):
+            candidates.append(item)
         if capped is not None and len(candidates) >= capped:
             break
     return candidates
 
 
+# Back-compat
+select_candidate_isbns = select_candidate_items
+
+
 async def preview_enrichment(
     db: Any,
     *,
+    ids: Optional[list[str]] = None,
     isbns: Optional[list[str]] = None,
     fill_empty_only: bool = True,
     limit: Optional[int] = None,
 ) -> dict[str, Any]:
     from app.services.isbn_lookup import lookup_isbn
 
-    candidates = await select_candidate_isbns(db, isbns=isbns, limit=limit)
+    # Legacy callers may still pass isbns; resolve to items by ISBN.
+    resolved_ids = list(ids or [])
+    if isbns and not resolved_ids:
+        for raw in isbns:
+            key = str(raw or "").strip()
+            if not key or is_local_id(key):
+                continue
+            row = await db.fetchrow("SELECT id FROM items WHERE isbn = $1", key)
+            if row:
+                resolved_ids.append(row["id"])
+
+    candidates = await select_candidate_items(
+        db, ids=resolved_ids or None, limit=limit
+    )
     sem = asyncio.Semaphore(LOOKUP_CONCURRENCY)
     suggestions: list[dict[str, Any]] = []
     failed = 0
 
-    async def one(book: dict[str, Any]) -> None:
+    async def one(item: dict[str, Any]) -> None:
         nonlocal failed
-        isbn = book["isbn"]
+        isbn = item["isbn"]
+        item_id = item["id"]
         async with sem:
             try:
                 meta = await lookup_isbn(isbn)
@@ -161,8 +187,9 @@ async def preview_enrichment(
                 failed += 1
                 suggestions.append(
                     {
+                        "id": item_id,
                         "isbn": isbn,
-                        "title": book.get("title") or "",
+                        "title": item.get("title") or "",
                         "lookup_source": "",
                         "fields": [],
                         "error": str(exc),
@@ -174,8 +201,9 @@ async def preview_enrichment(
                 logger.exception("enrich lookup failed for %s", isbn)
                 suggestions.append(
                     {
+                        "id": item_id,
                         "isbn": isbn,
-                        "title": book.get("title") or "",
+                        "title": item.get("title") or "",
                         "lookup_source": "",
                         "fields": [],
                         "error": f"Error de red: {exc}",
@@ -183,21 +211,22 @@ async def preview_enrichment(
                 )
                 return
 
-        fields = suggested_fills(book, meta, fill_empty_only=fill_empty_only)
+        fields = suggested_fills(item, meta, fill_empty_only=fill_empty_only)
         if not fields and not fill_empty_only:
             return
         suggestions.append(
             {
+                "id": item_id,
                 "isbn": isbn,
-                "title": book.get("title") or "",
+                "title": item.get("title") or "",
                 "lookup_source": meta.get("source") or "",
                 "fields": fields,
                 "error": None,
             }
         )
 
-    await asyncio.gather(*(one(book) for book in candidates))
-    suggestions.sort(key=lambda item: item["isbn"])
+    await asyncio.gather(*(one(item) for item in candidates))
+    suggestions.sort(key=lambda item: (item.get("isbn") or "", item.get("id") or ""))
 
     with_changes = [s for s in suggestions if s.get("fields")]
     return {
@@ -217,38 +246,43 @@ async def apply_updates(
 ) -> dict[str, Any]:
     """Apply confirmed field maps. Re-checks emptiness when ``fill_empty_only``."""
     from app.db.common import record_to_dict
-    from app.schemas import normalize_authors, normalize_book_key, normalize_labels
+    from app.schemas import normalize_authors, normalize_labels
 
     updated = 0
     skipped = 0
     errors: list[dict[str, str]] = []
 
-    for item in updates:
-        raw_isbn = str(item.get("isbn") or "").strip()
-        fields = item.get("fields") or {}
-        if not raw_isbn or not isinstance(fields, dict) or not fields:
-            skipped += 1
-            continue
-        try:
-            isbn = normalize_book_key(raw_isbn)
-        except ValueError as exc:
-            errors.append({"isbn": raw_isbn, "error": str(exc)})
-            continue
-        if is_local_id(isbn):
+    for entry in updates:
+        item_id = str(entry.get("id") or "").strip()
+        raw_isbn = str(entry.get("isbn") or "").strip()
+        fields = entry.get("fields") or {}
+        if not isinstance(fields, dict) or not fields:
             skipped += 1
             continue
 
-        row = await db.fetchrow("SELECT * FROM books WHERE isbn = $1", isbn)
-        if not row:
-            errors.append({"isbn": isbn, "error": "No encontrado"})
+        if item_id:
+            row = await db.fetchrow("SELECT * FROM items WHERE id = $1", item_id)
+        elif raw_isbn and not is_local_id(raw_isbn):
+            row = await db.fetchrow("SELECT * FROM items WHERE isbn = $1", raw_isbn)
+        else:
+            skipped += 1
             continue
-        book = record_to_dict(row)
+
+        if not row:
+            errors.append({"id": item_id or raw_isbn, "error": "No encontrado"})
+            continue
+        item = record_to_dict(row)
+        item_id = item["id"]
+
+        if not item_needs_enrichment(item) and fill_empty_only:
+            # Still allow apply when fields were already previewed as empty.
+            pass
 
         patch: dict[str, Any] = {}
         for name, value in fields.items():
             if name not in ENRICHABLE_FIELDS:
                 continue
-            if fill_empty_only and not field_is_empty(book, name):
+            if fill_empty_only and not field_is_empty(item, name):
                 continue
             if name in {"authors", "translators"}:
                 value = normalize_authors(value)
@@ -276,13 +310,13 @@ async def apply_updates(
         for index, (key, value) in enumerate(patch.items(), start=1):
             assignments.append(f"{key} = ${index}")
             values.append(value)
-        values.append(isbn)
+        values.append(item_id)
         await db.fetchrow(
             f"""
-            UPDATE books
+            UPDATE items
             SET {', '.join(assignments)}, updated_at = NOW()
-            WHERE isbn = ${len(values)}
-            RETURNING isbn
+            WHERE id = ${len(values)}
+            RETURNING id
             """,
             *values,
         )

@@ -1,18 +1,21 @@
-"""Offline inventory import helpers (JSON / CSV → book rows → DB insert)."""
+"""Offline inventory import helpers (JSON / CSV → item rows → DB insert)."""
 
 from __future__ import annotations
 
 import logging
+import uuid
 from csv import DictReader
 from datetime import datetime
 from io import StringIO
 from typing import Any, Optional
 
 from app.db import DbConnection
+from app.schemas import MediaType, is_local_id, is_print_media
 
 logger = logging.getLogger("alejandrisbn.importers")
 
 _NA_VALUES = {"", "n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}
+_VALID_MEDIA = {m.value for m in MediaType}
 
 
 def _parse_ts(value: Any) -> Optional[datetime]:
@@ -44,7 +47,6 @@ def _normalize_isbn(value: str) -> str:
 
 
 def _optional_text(value: Any) -> str:
-    """Treat blank / n/a placeholders as empty string."""
     text = str(value or "").strip()
     if text.lower() in _NA_VALUES:
         return ""
@@ -55,71 +57,114 @@ def _legal_deposit_from_row(row: dict[str, Any]) -> str:
     return _optional_text(row.get("legal_deposit") or row.get("deposito_legal") or "")
 
 
-def books_from_json(payload: Any) -> list[dict[str, Any]]:
-    from app.schemas import generate_local_id, is_local_id, normalize_authors, normalize_labels
+def _parse_media_type(row: dict[str, Any]) -> str:
+    raw = _optional_text(row.get("media_type") or row.get("tipo") or "").lower()
+    if raw in _VALID_MEDIA:
+        return raw
+    return "book"
 
+
+def _parse_item_id(row: dict[str, Any]) -> str:
+    raw = _optional_text(row.get("id"))
+    if raw:
+        return raw
+    return str(uuid.uuid4())
+
+
+def _isbn_from_row(row: dict[str, Any], *, media_type: str) -> Optional[str]:
+    if not is_print_media(media_type):
+        return None
+    raw_isbn = _optional_text(row.get("isbn"))
+    if not raw_isbn or is_local_id(raw_isbn):
+        return None
+    isbn = _normalize_isbn(raw_isbn)
+    if len(isbn) not in (10, 13):
+        return "__invalid__"
+    return isbn
+
+
+def _year_from(row: dict[str, Any], *keys: str) -> Optional[int]:
+    for key in keys:
+        raw = _optional_text(row.get(key) or "")
+        if not raw:
+            continue
+        try:
+            return int(float(raw))
+        except ValueError:
+            continue
+    return None
+
+
+def _clean_row(row: dict[str, Any]) -> Optional[dict[str, Any]]:
+    from app.schemas import normalize_authors, normalize_labels
+
+    title = _optional_text(row.get("title"))
+    media_type = _parse_media_type(row)
+    isbn = _isbn_from_row(row, media_type=media_type)
+    if isbn == "__invalid__":
+        logger.warning("Import: skipping invalid ISBN %r for %r", row.get("isbn"), title)
+        return None
+    if not title:
+        if isbn:
+            title = isbn
+        else:
+            return None
+
+    return {
+        "id": _parse_item_id(row),
+        "media_type": media_type,
+        "isbn": isbn,
+        "title": title,
+        "authors": normalize_authors(row.get("authors")),
+        "publication_year": row.get("publication_year")
+        if isinstance(row.get("publication_year"), int)
+        else _year_from(row, "publication_year", "year"),
+        "genre": normalize_labels(row.get("genre")),
+        "publisher": _optional_text(row.get("publisher")),
+        "cover_url": _optional_text(row.get("cover_url")),
+        "description": _optional_text(row.get("description")),
+        "location": _optional_text(row.get("location")),
+        "notes": _optional_text(row.get("notes")),
+        "legal_deposit": _legal_deposit_from_row(row) if is_print_media(media_type) else "",
+        "collection": _optional_text(row.get("collection") or row.get("coleccion")),
+        "volume": _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo")),
+        "original_year": row.get("original_year")
+        if isinstance(row.get("original_year"), int)
+        else _year_from(row, "original_year"),
+        "translators": normalize_labels(row.get("translators") or row.get("traductores")),
+        "original_title": _optional_text(row.get("original_title") or row.get("titulo_original")),
+        "favourite": bool(row.get("favourite", False)),
+        "source": _optional_text(row.get("source")) or "import",
+        "created_at": _parse_ts(row.get("created_at")),
+        "updated_at": _parse_ts(row.get("updated_at")),
+    }
+
+
+def items_from_json(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
-        if isinstance(payload.get("books"), list):
+        if isinstance(payload.get("items"), list):
+            rows = payload["items"]
+        elif isinstance(payload.get("books"), list):
             rows = payload["books"]
         else:
             rows = [payload]
     elif isinstance(payload, list):
         rows = payload
     else:
-        raise ValueError("JSON must be a list of books or an object with a 'books' array")
+        raise ValueError("JSON must be a list of items or an object with an 'items'/'books' array")
 
     cleaned: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        title = _optional_text(row.get("title"))
-        if not title:
-            continue
-
-        raw_isbn = _optional_text(row.get("isbn"))
-        if not raw_isbn:
-            isbn = generate_local_id()
-        elif is_local_id(raw_isbn):
-            isbn = raw_isbn.upper()
-        else:
-            isbn = _normalize_isbn(raw_isbn)
-            if len(isbn) not in (10, 13):
-                logger.warning("JSON import: skipping invalid ISBN %r for %r", row.get("isbn"), title)
-                continue
-
-        cleaned.append(
-            {
-                "isbn": isbn,
-                "title": title,
-                "authors": normalize_authors(row.get("authors")),
-                "publication_year": row.get("publication_year"),
-                "genre": normalize_labels(row.get("genre")),
-                "publisher": _optional_text(row.get("publisher")),
-                "cover_url": _optional_text(row.get("cover_url")),
-                "description": _optional_text(row.get("description")),
-                "location": _optional_text(row.get("location")),
-                "notes": _optional_text(row.get("notes")),
-                "legal_deposit": _legal_deposit_from_row(row),
-                "collection": _optional_text(row.get("collection") or row.get("coleccion")),
-                "volume": _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo")),
-                "original_year": row.get("original_year"),
-                "translators": normalize_labels(row.get("translators") or row.get("traductores")),
-                "original_title": _optional_text(
-                    row.get("original_title") or row.get("titulo_original")
-                ),
-                "favourite": bool(row.get("favourite", False)),
-                "source": _optional_text(row.get("source")) or "import",
-                "created_at": _parse_ts(row.get("created_at")),
-                "updated_at": _parse_ts(row.get("updated_at")),
-            }
-        )
+        item = _clean_row(row)
+        if item:
+            cleaned.append(item)
     return cleaned
 
 
-def books_from_csv(text: str) -> list[dict[str, Any]]:
-    """Parse an export-style CSV (full inventory columns) into book rows for insert."""
-    from app.schemas import generate_local_id, is_local_id, normalize_authors, normalize_labels
-
+def items_from_csv(text: str) -> list[dict[str, Any]]:
+    """Parse an export-style CSV into item rows for insert."""
     reader = DictReader(StringIO(text))
     if not reader.fieldnames:
         raise ValueError("CSV sin cabecera")
@@ -136,116 +181,75 @@ def books_from_csv(text: str) -> list[dict[str, Any]]:
         }
         if not any(_optional_text(v) for v in row.values()):
             continue
-
-        title = _optional_text(row.get("title"))
-        raw_isbn = _optional_text(row.get("isbn"))
-
-        if not title and not raw_isbn:
-            continue
-
-        if not raw_isbn:
-            isbn = generate_local_id()
-        elif is_local_id(raw_isbn):
-            isbn = raw_isbn.upper()
+        if "favourite" in row and _optional_text(row.get("favourite")) != "":
+            row["favourite"] = _parse_bool(row["favourite"])
         else:
-            isbn = _normalize_isbn(raw_isbn)
-            if len(isbn) not in (10, 13):
-                logger.warning("CSV import: skipping invalid ISBN %r", row.get("isbn"))
-                continue
-
-        if not title:
-            title = isbn
-
-        year = None
-        year_raw = _optional_text(row.get("publication_year") or row.get("year") or "")
-        if year_raw:
-            try:
-                year = int(float(year_raw))
-            except ValueError:
-                year = None
-
-        original_year = None
-        oy_raw = _optional_text(row.get("original_year") or "")
-        if oy_raw:
-            try:
-                original_year = int(float(oy_raw))
-            except ValueError:
-                original_year = None
-
-        cleaned.append(
-            {
-                "isbn": isbn,
-                "title": title,
-                "authors": normalize_authors(row.get("authors")),
-                "publication_year": year,
-                "genre": normalize_labels(row.get("genre")),
-                "publisher": _optional_text(row.get("publisher")),
-                "cover_url": _optional_text(row.get("cover_url")),
-                "description": _optional_text(row.get("description")),
-                "location": _optional_text(row.get("location")),
-                "notes": _optional_text(row.get("notes")),
-                "legal_deposit": _legal_deposit_from_row(row),
-                "collection": _optional_text(row.get("collection") or row.get("coleccion")),
-                "volume": _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo")),
-                "original_year": original_year,
-                "translators": normalize_labels(row.get("translators") or row.get("traductores")),
-                "original_title": _optional_text(
-                    row.get("original_title") or row.get("titulo_original")
-                ),
-                "favourite": _parse_bool(row["favourite"])
-                if "favourite" in row and _optional_text(row.get("favourite")) != ""
-                else False,
-                "source": _optional_text(row.get("source")) or "import",
-                "created_at": _parse_ts(row.get("created_at")),
-                "updated_at": _parse_ts(row.get("updated_at")),
-            }
-        )
+            row["favourite"] = False
+        item = _clean_row(row)
+        if item:
+            cleaned.append(item)
     return cleaned
 
 
-async def insert_books(conn: DbConnection, books: list[dict[str, Any]]) -> list[str]:
-    """Insert books; return ISBNs that were newly inserted (conflicts skipped)."""
-    inserted_isbns: list[str] = []
-    for book in books:
+async def insert_items(conn: DbConnection, items: list[dict[str, Any]]) -> list[str]:
+    """Insert items; return IDs that were newly inserted (conflicts skipped)."""
+    inserted_ids: list[str] = []
+    for item in items:
+        # Skip if ISBN already present (print media).
+        if item.get("isbn"):
+            exists = await conn.fetchval("SELECT id FROM items WHERE isbn = $1", item["isbn"])
+            if exists:
+                continue
+        exists_id = await conn.fetchval("SELECT id FROM items WHERE id = $1", item["id"])
+        if exists_id:
+            continue
+
         result = await conn.execute(
             """
-            INSERT INTO books (
-                isbn, title, authors, publication_year, genre, publisher,
+            INSERT INTO items (
+                id, media_type, isbn, title, authors, publication_year, genre, publisher,
                 cover_url, description, location, notes, legal_deposit, collection, volume,
                 original_year, translators, original_title,
                 favourite, source, created_at, updated_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11, $12, $13,
-                $14, $15, $16,
-                $17, $18,
-                COALESCE($19, NOW()),
-                COALESCE($20, NOW())
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                $9, $10, $11, $12, $13, $14, $15,
+                $16, $17, $18,
+                $19, $20,
+                COALESCE($21, NOW()),
+                COALESCE($22, NOW())
             )
-            ON CONFLICT (isbn) DO NOTHING
+            ON CONFLICT (id) DO NOTHING
             """,
-            book["isbn"],
-            book["title"],
-            book["authors"],
-            book["publication_year"],
-            book["genre"],
-            book["publisher"],
-            book["cover_url"],
-            book["description"],
-            book["location"],
-            book["notes"],
-            book.get("legal_deposit") or "",
-            book.get("collection") or "",
-            book.get("volume") or "",
-            book.get("original_year"),
-            book.get("translators") or "",
-            book.get("original_title") or "",
-            book["favourite"],
-            book["source"],
-            book["created_at"],
-            book["updated_at"],
+            item["id"],
+            item["media_type"],
+            item["isbn"],
+            item["title"],
+            item["authors"],
+            item["publication_year"],
+            item["genre"],
+            item["publisher"],
+            item["cover_url"],
+            item["description"],
+            item["location"],
+            item["notes"],
+            item.get("legal_deposit") or "",
+            item.get("collection") or "",
+            item.get("volume") or "",
+            item.get("original_year"),
+            item.get("translators") or "",
+            item.get("original_title") or "",
+            item["favourite"],
+            item["source"],
+            item["created_at"],
+            item["updated_at"],
         )
-        # asyncpg: "INSERT 0 1"; sqlite rowcount may be 1 or -1 depending on version
         if result.startswith("INSERT") and not result.rstrip().endswith(" 0"):
-            inserted_isbns.append(book["isbn"])
-    return inserted_isbns
+            inserted_ids.append(item["id"])
+    return inserted_ids
+
+
+# Back-compat aliases
+books_from_json = items_from_json
+books_from_csv = items_from_csv
+insert_books = insert_items

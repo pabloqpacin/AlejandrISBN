@@ -8,7 +8,7 @@ from typing import Any, AsyncIterator
 from app.db.config import resolve_backend, sqlite_path_from_url
 from app.db.postgres import PgConnection, create_pool as create_pg_pool
 from app.db.postgres import search_clause as pg_search_clause
-from app.db.schema import ensure_books_schema
+from app.db.schema import ensure_items_schema
 from app.db.sqlite import SqlitePool
 from app.db.sqlite import search_clause as sqlite_search_clause
 
@@ -78,7 +78,7 @@ async def init_db() -> None:
         if IS_POSTGRES:
             async with conn.transaction():
                 await conn.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
-                await ensure_books_schema(conn, is_sqlite=False)
+                await ensure_items_schema(conn, is_sqlite=False)
         else:
             # SQLite: DDL auto-commits; avoid wrapping in an explicit transaction.
-            await ensure_books_schema(conn, is_sqlite=True)
+            await ensure_items_schema(conn, is_sqlite=True)

@@ -1,10 +1,27 @@
 import re
 import uuid
-from typing import Optional
+from enum import Enum
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
 LOCAL_ID_RE = re.compile(r"^LOCAL-[A-Z0-9]{8,32}$", re.IGNORECASE)
+
+PRINT_MEDIA_TYPES = frozenset({"book", "magazine"})
+MediaTypeName = Literal["book", "magazine", "cd", "dvd", "vhs", "cassette"]
+
+
+class MediaType(str, Enum):
+    book = "book"
+    magazine = "magazine"
+    cd = "cd"
+    dvd = "dvd"
+    vhs = "vhs"
+    cassette = "cassette"
+
+
+def generate_item_id() -> str:
+    return str(uuid.uuid4())
 
 
 def normalize_isbn(value: str) -> str:
@@ -19,15 +36,21 @@ def is_local_id(value: str) -> bool:
 
 
 def generate_local_id() -> str:
+    """Deprecated identity helper — kept for legacy import normalization only."""
     return f"LOCAL-{uuid.uuid4().hex[:12].upper()}"
 
 
 def normalize_book_key(value: str) -> str:
-    """Accept a real ISBN or a LOCAL-* inventory id."""
+    """Legacy helper: accept a real ISBN or a LOCAL-* inventory id."""
     raw = (value or "").strip()
     if is_local_id(raw):
         return raw.upper()
     return normalize_isbn(raw)
+
+
+def is_print_media(media_type: str | MediaType | None) -> bool:
+    value = media_type.value if isinstance(media_type, MediaType) else str(media_type or "")
+    return value in PRINT_MEDIA_TYPES
 
 
 def normalize_labels(value: Optional[str]) -> str:
@@ -164,9 +187,10 @@ def normalize_authors(value: Optional[str]) -> str:
     return "; ".join(unique)
 
 
-class BookCreate(BaseModel):
-    """Create from ISBN lookup, or manually without ISBN (magazines, manuals, docs)."""
+class ItemCreate(BaseModel):
+    """Create from ISBN lookup (print), or manually for any media type."""
 
+    media_type: MediaType = MediaType.book
     isbn: Optional[str] = Field(None, max_length=40)
     title: Optional[str] = None
     authors: Optional[str] = None
@@ -186,7 +210,7 @@ class BookCreate(BaseModel):
     favourite: bool = False
 
     @model_validator(mode="after")
-    def validate_identity(self) -> "BookCreate":
+    def validate_identity(self) -> "ItemCreate":
         isbn = (self.isbn or "").strip()
         title = (self.title or "").strip()
         self.authors = normalize_authors(self.authors)
@@ -201,17 +225,20 @@ class BookCreate(BaseModel):
         if self.legal_deposit.lower() in {"n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}:
             self.legal_deposit = ""
 
-        if not isbn:
+        if not is_print_media(self.media_type):
+            if isbn:
+                raise ValueError("isbn only applies to books and magazines")
+            if not title:
+                raise ValueError("title is required")
+            self.isbn = None
+            self.title = title
+            self.legal_deposit = ""
+            return self
+
+        if not isbn or is_local_id(isbn):
             if not title:
                 raise ValueError("title is required when creating without ISBN")
             self.isbn = None
-            self.title = title
-            return self
-
-        if is_local_id(isbn):
-            if not title:
-                raise ValueError("title is required for items without ISBN")
-            self.isbn = isbn.upper()
             self.title = title
             return self
 
@@ -221,7 +248,9 @@ class BookCreate(BaseModel):
         return self
 
 
-class BookUpdate(BaseModel):
+class ItemUpdate(BaseModel):
+    media_type: Optional[MediaType] = None
+    isbn: Optional[str] = None
     title: Optional[str] = None
     authors: Optional[str] = None
     publication_year: Optional[int] = None
@@ -240,7 +269,7 @@ class BookUpdate(BaseModel):
     favourite: Optional[bool] = None
 
     @model_validator(mode="after")
-    def normalize_label_fields(self) -> "BookUpdate":
+    def normalize_label_fields(self) -> "ItemUpdate":
         if self.authors is not None:
             self.authors = normalize_authors(self.authors)
         if self.genre is not None:
@@ -253,11 +282,24 @@ class BookUpdate(BaseModel):
             self.volume = (self.volume or "").strip()
         if self.original_title is not None:
             self.original_title = (self.original_title or "").strip()
+        if self.legal_deposit is not None:
+            text = (self.legal_deposit or "").strip()
+            if text.lower() in {"n/a", "na", "n.a.", "n.a", "none", "null", "-", "—", "–"}:
+                text = ""
+            self.legal_deposit = text
+        if self.isbn is not None:
+            raw = (self.isbn or "").strip()
+            if not raw or is_local_id(raw):
+                self.isbn = None
+            else:
+                self.isbn = normalize_isbn(raw)
         return self
 
 
-class BookOut(BaseModel):
-    isbn: str
+class ItemOut(BaseModel):
+    id: str
+    media_type: MediaTypeName = "book"
+    isbn: Optional[str] = None
     title: str
     authors: str
     publication_year: Optional[int] = None
@@ -282,4 +324,17 @@ class BookOut(BaseModel):
 
     @property
     def has_isbn(self) -> bool:
-        return not is_local_id(self.isbn)
+        isbn = (self.isbn or "").strip()
+        return bool(isbn) and not is_local_id(isbn)
+
+
+class StatsOut(BaseModel):
+    total: int
+    by_media_type: dict[str, int]
+    by_location: list[dict[str, int | str]]
+
+
+# Back-compat aliases
+BookCreate = ItemCreate
+BookUpdate = ItemUpdate
+BookOut = ItemOut

@@ -7,22 +7,14 @@ import json
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.db import get_db
-from app.importers import books_from_csv, books_from_json, insert_books
+from app.importers import items_from_csv, items_from_json, insert_items
 
 router = APIRouter(prefix="/api/import", tags=["import"])
 
 _LEGACY_SEED_SOURCES = {"seed", "seed-csv:lookup", "seed-csv:manual"}
 
 
-@router.post("/books")
-async def import_books(
-    file: UploadFile = File(..., description="JSON or CSV inventory export"),
-    db=Depends(get_db),
-) -> dict:
-    """Import books from a JSON or CSV file (same shapes as ``/api/export/books``).
-
-    Existing ISBNs are skipped (``ON CONFLICT DO NOTHING``).
-    """
+async def _import_payload(file: UploadFile, db) -> dict:
     content = await file.read()
     try:
         text = content.decode("utf-8-sig")
@@ -41,27 +33,47 @@ async def import_books(
 
     try:
         if is_csv:
-            books = books_from_csv(text)
+            items = items_from_csv(text)
         else:
-            books = books_from_json(json.loads(text))
+            items = items_from_json(json.loads(text))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail=f"JSON inválido: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if not books:
-        raise HTTPException(status_code=400, detail="No hay libros válidos en el archivo")
+    if not items:
+        raise HTTPException(status_code=400, detail="No hay ítems válidos en el archivo")
 
-    for book in books:
-        if not book.get("source") or book["source"] in _LEGACY_SEED_SOURCES:
-            book["source"] = "import"
+    for item in items:
+        if not item.get("source") or item["source"] in _LEGACY_SEED_SOURCES:
+            item["source"] = "import"
 
-    inserted_isbns = await insert_books(db, books)
+    inserted_ids = await insert_items(db, items)
     return {
         "ok": True,
         "format": "csv" if is_csv else "json",
-        "parsed": len(books),
-        "inserted": len(inserted_isbns),
-        "skipped": len(books) - len(inserted_isbns),
-        "inserted_isbns": inserted_isbns,
+        "parsed": len(items),
+        "inserted": len(inserted_ids),
+        "skipped": len(items) - len(inserted_ids),
+        "inserted_ids": inserted_ids,
     }
+
+
+@router.post("/items")
+async def import_items(
+    file: UploadFile = File(..., description="JSON or CSV inventory export"),
+    db=Depends(get_db),
+) -> dict:
+    """Import items from a JSON or CSV file (same shapes as ``/api/export/items``).
+
+    Also accepts legacy ``{"books": [...]}`` exports. Existing IDs / ISBNs are skipped.
+    """
+    return await _import_payload(file, db)
+
+
+@router.post("/books")
+async def import_books_legacy(
+    file: UploadFile = File(..., description="JSON or CSV inventory export"),
+    db=Depends(get_db),
+) -> dict:
+    return await _import_payload(file, db)

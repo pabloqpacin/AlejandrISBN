@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AlejandrISBN — Inventario de biblioteca</title>
+  <title>AlejandrISBN — Inventario</title>
   <script>
     (() => {
       try {
@@ -21,7 +21,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/styles.css?v=20260803j" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=20260803k" />
 </head>
 <body>
   <div class="atmosphere" aria-hidden="true"></div>
@@ -33,7 +33,7 @@
 
   <header class="hero">
     <h1 class="brand">AlejandrISBN</h1>
-    <p class="lede">Inventario lean de biblioteca. Busca por ISBN o añade revistas, manuales y documentos sin ISBN.</p>
+    <p class="lede" id="hero-lede">Inventario lean de biblioteca y multimedia.</p>
 
     <form id="lookup-form" class="add-form lookup-only" autocomplete="off">
       <label class="field">
@@ -53,13 +53,44 @@
         <button type="button" class="btn ghost" id="manual-btn">Sin ISBN</button>
       </div>
     </form>
+    <div id="manual-only-actions" class="add-actions manual-only-actions hidden">
+      <button type="button" class="btn primary" id="add-manual-media-btn">Añadir</button>
+    </div>
     <p id="form-status" class="status" role="status" aria-live="polite"></p>
   </header>
 
-  <main class="inventory">
+  <nav class="catalog-nav" id="catalog-nav" aria-label="Categorías">
+    <button type="button" class="catalog-tab active" data-tab="overview">Resumen</button>
+    <button type="button" class="catalog-tab" data-tab="all">Todos</button>
+    <button type="button" class="catalog-tab" data-tab="book">Libros</button>
+    <button type="button" class="catalog-tab" data-tab="magazine">Revistas</button>
+    <button type="button" class="catalog-tab" data-tab="cd">CDs</button>
+    <button type="button" class="catalog-tab" data-tab="dvd">DVDs</button>
+    <button type="button" class="catalog-tab" data-tab="vhs">VHS</button>
+    <button type="button" class="catalog-tab" data-tab="cassette">Cassettes</button>
+  </nav>
+
+  <section id="overview-panel" class="overview-panel">
+    <div class="overview-head">
+      <h2>Resumen</h2>
+      <p id="overview-total" class="list-meta"></p>
+    </div>
+    <div class="overview-grid">
+      <div class="overview-block">
+        <h3>Por tipo</h3>
+        <ul id="overview-by-type" class="overview-list"></ul>
+      </div>
+      <div class="overview-block">
+        <h3>Por ubicación</h3>
+        <ul id="overview-by-location" class="overview-list"></ul>
+      </div>
+    </div>
+  </section>
+
+  <main class="inventory hidden" id="inventory-panel" hidden>
     <div class="inventory-head">
       <div>
-        <h2>Inventario</h2>
+        <h2 id="inventory-title">Inventario</h2>
         <p id="list-meta" class="list-meta"></p>
       </div>
       <div class="inventory-tools">
@@ -107,7 +138,7 @@
     </div>
 
     <div class="table-wrap">
-      <table class="inventory-table" aria-label="Inventario de libros">
+      <table class="inventory-table" id="inventory-table" aria-label="Inventario">
         <thead>
           <tr>
             <th scope="col" class="col-select">
@@ -123,13 +154,13 @@
             <th scope="col"><button type="button" class="sort-btn" data-sort="title">Título</button></th>
             <th scope="col">
               <div class="th-cell">
-                <button type="button" class="sort-btn" data-sort="authors">Autor</button>
-                <button type="button" class="group-toggle" data-group="authors" title="Añadir/quitar agrupación por autor" aria-pressed="false">▦</button>
+                <button type="button" class="sort-btn" data-sort="authors" id="sort-authors-label">Autor</button>
+                <button type="button" class="group-toggle" data-group="authors" title="Añadir/quitar agrupación" aria-pressed="false">▦</button>
               </div>
             </th>
             <th scope="col" class="col-year"><button type="button" class="sort-btn" data-sort="publication_year">Año</button></th>
-            <th scope="col" class="col-isbn"><button type="button" class="sort-btn" data-sort="isbn">ISBN</button></th>
-            <th scope="col" class="col-dl"><button type="button" class="sort-btn" data-sort="legal_deposit">DL</button></th>
+            <th scope="col" class="col-isbn col-print"><button type="button" class="sort-btn" data-sort="isbn">ISBN</button></th>
+            <th scope="col" class="col-dl col-print"><button type="button" class="sort-btn" data-sort="legal_deposit">DL</button></th>
             <th scope="col">
               <div class="th-cell">
                 <button type="button" class="sort-btn" data-sort="genre">Género</button>
@@ -144,8 +175,8 @@
             </th>
             <th scope="col">
               <div class="th-cell">
-                <button type="button" class="sort-btn" data-sort="publisher">Editorial</button>
-                <button type="button" class="group-toggle" data-group="publisher" title="Añadir/quitar agrupación por editorial" aria-pressed="false">▦</button>
+                <button type="button" class="sort-btn" data-sort="publisher" id="sort-publisher-label">Editorial</button>
+                <button type="button" class="group-toggle" data-group="publisher" title="Añadir/quitar agrupación" aria-pressed="false">▦</button>
               </div>
             </th>
             <th scope="col">
@@ -162,7 +193,7 @@
       </table>
     </div>
 
-    <p id="empty-state" class="empty hidden">Aún no hay libros. Añade el primero con su ISBN.</p>
+    <p id="empty-state" class="empty hidden">Aún no hay ítems en esta categoría.</p>
   </main>
 
   <dialog id="batch-dialog" class="detail-dialog">
@@ -193,6 +224,6 @@
     </div>
   </dialog>
 
-  <script src="/static/js/app.js?v=20260803j" type="module"></script>
+  <script src="/static/js/app.js?v=20260803k" type="module"></script>
 </body>
 </html>

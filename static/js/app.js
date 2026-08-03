@@ -59,8 +59,41 @@ const GROUP_LABELS = {
 };
 
 const COL_COUNT = 14;
-const selectedIsbns = new Set();
+const selectedIds = new Set();
 
+const MEDIA_TABS = {
+  overview: { label: "Resumen", mediaType: null },
+  all: { label: "Todos", mediaType: null },
+  book: { label: "Libros", mediaType: "book" },
+  magazine: { label: "Revistas", mediaType: "magazine" },
+  cd: { label: "CDs", mediaType: "cd" },
+  dvd: { label: "DVDs", mediaType: "dvd" },
+  vhs: { label: "VHS", mediaType: "vhs" },
+  cassette: { label: "Cassettes", mediaType: "cassette" },
+};
+const PRINT_TYPES = new Set(["book", "magazine"]);
+const MEDIA_LABELS = {
+  book: "Libros",
+  magazine: "Revistas",
+  cd: "CDs",
+  dvd: "DVDs",
+  vhs: "VHS",
+  cassette: "Cassettes",
+};
+const TAB_STATE_KEY = "alejandrisbn-tab";
+
+const overviewPanel = document.getElementById("overview-panel");
+const inventoryPanel = document.getElementById("inventory-panel");
+const catalogNav = document.getElementById("catalog-nav");
+const overviewTotal = document.getElementById("overview-total");
+const overviewByType = document.getElementById("overview-by-type");
+const overviewByLocation = document.getElementById("overview-by-location");
+const heroLede = document.getElementById("hero-lede");
+const manualOnlyActions = document.getElementById("manual-only-actions");
+const addManualMediaBtn = document.getElementById("add-manual-media-btn");
+const inventoryTitle = document.getElementById("inventory-title");
+
+let activeTab = "overview";
 let books = [];
 let searchTimer = null;
 let pendingIsbn = "";
@@ -350,9 +383,162 @@ function isLocalId(isbn) {
   return /^LOCAL-[A-Z0-9]{8,32}$/i.test(String(isbn || "").trim());
 }
 
+
+function loadActiveTab() {
+  try {
+    const saved = sessionStorage.getItem(TAB_STATE_KEY);
+    if (saved && MEDIA_TABS[saved]) activeTab = saved;
+  } catch {
+    /* ignore */
+  }
+}
+
+function saveActiveTab() {
+  try {
+    sessionStorage.setItem(TAB_STATE_KEY, activeTab);
+  } catch {
+    /* ignore */
+  }
+}
+
+function currentMediaType() {
+  return MEDIA_TABS[activeTab]?.mediaType || null;
+}
+
+function isPrintTab() {
+  if (activeTab === "all" || activeTab === "overview") return true;
+  return PRINT_TYPES.has(currentMediaType() || "");
+}
+
+function defaultMediaTypeForCreate() {
+  const mt = currentMediaType();
+  if (mt) return mt;
+  return "book";
+}
+
+function updateHeroForTab() {
+  const mt = currentMediaType();
+  const print = !mt || PRINT_TYPES.has(mt);
+  lookupForm?.classList.toggle("hidden", activeTab === "overview" ? false : !print);
+  if (activeTab === "overview") {
+    lookupForm?.classList.remove("hidden");
+    manualOnlyActions?.classList.add("hidden");
+    if (heroLede) {
+      heroLede.textContent = "Inventario lean de biblioteca y multimedia. Elige una categoría o añade desde aquí.";
+    }
+    return;
+  }
+  lookupForm?.classList.toggle("hidden", !print);
+  manualOnlyActions?.classList.toggle("hidden", print);
+  if (heroLede) {
+    if (print) {
+      heroLede.textContent = mt === "magazine"
+        ? "Revistas: busca por ISBN o añade sin ISBN."
+        : "Libros: busca por ISBN o añade sin ISBN.";
+      if (activeTab === "all") {
+        heroLede.textContent = "Todo el inventario. ISBN solo para libros y revistas.";
+      }
+    } else {
+      const label = MEDIA_LABELS[mt] || mt;
+      heroLede.textContent = `${label}: alta manual (sin lookup online todavía).`;
+    }
+  }
+}
+
+function updatePrintColumns() {
+  const show = isPrintTab();
+  document.querySelectorAll(".col-print").forEach((el) => {
+    el.classList.toggle("hidden", !show);
+    if (el.tagName === "TH" || el.tagName === "TD") {
+      el.hidden = !show;
+    }
+  });
+  const authorsBtn = document.getElementById("sort-authors-label");
+  const publisherBtn = document.getElementById("sort-publisher-label");
+  if (authorsBtn) {
+    authorsBtn.textContent = PRINT_TYPES.has(currentMediaType() || "book") || activeTab === "all" || activeTab === "overview"
+      ? "Autor"
+      : "Artista / créditos";
+  }
+  if (publisherBtn) {
+    publisherBtn.textContent = PRINT_TYPES.has(currentMediaType() || "book") || activeTab === "all" || activeTab === "overview"
+      ? "Editorial"
+      : "Sello / estudio";
+  }
+}
+
+function setActiveTab(tab, { skipLoad = false } = {}) {
+  if (!MEDIA_TABS[tab]) tab = "overview";
+  activeTab = tab;
+  saveActiveTab();
+  catalogNav?.querySelectorAll(".catalog-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === activeTab);
+  });
+  const showOverview = activeTab === "overview";
+  overviewPanel?.classList.toggle("hidden", !showOverview);
+  if (overviewPanel) overviewPanel.hidden = !showOverview;
+  inventoryPanel?.classList.toggle("hidden", showOverview);
+  if (inventoryPanel) inventoryPanel.hidden = showOverview;
+  if (inventoryTitle) {
+    inventoryTitle.textContent = MEDIA_TABS[activeTab]?.label || "Inventario";
+  }
+  updateHeroForTab();
+  updatePrintColumns();
+  if (skipLoad) return;
+  if (showOverview) {
+    loadOverview();
+  } else {
+    loadBooks();
+  }
+}
+
+async function loadOverview() {
+  try {
+    const res = await fetch("/api/stats");
+    if (!res.ok) {
+      setStatus("Error al cargar el resumen.", true);
+      return;
+    }
+    const stats = await res.json();
+    if (overviewTotal) {
+      overviewTotal.textContent = `${stats.total} ítem(s) en total`;
+    }
+    if (overviewByType) {
+      const order = ["book", "magazine", "cd", "dvd", "vhs", "cassette"];
+      overviewByType.innerHTML = order
+        .map((type) => {
+          const count = stats.by_media_type?.[type] || 0;
+          return `<li><button type="button" class="overview-link" data-goto-tab="${type}"><span>${escapeHtml(MEDIA_LABELS[type] || type)}</span><strong>${count}</strong></button></li>`;
+        })
+        .join("");
+    }
+    if (overviewByLocation) {
+      const rows = stats.by_location || [];
+      if (!rows.length) {
+        overviewByLocation.innerHTML = `<li class="overview-empty">Sin ubicaciones aún</li>`;
+      } else {
+        overviewByLocation.innerHTML = rows
+          .map((row) => {
+            const value = String(row.value || "");
+            const isEmpty = value === "(sin ubicación)";
+            return `<li><button type="button" class="overview-link" data-goto-location="${escapeHtml(isEmpty ? "" : value)}" data-location-label="${escapeHtml(value)}"><span>${escapeHtml(value)}</span><strong>${row.count}</strong></button></li>`;
+          })
+          .join("");
+      }
+    }
+  } catch {
+    setStatus("Error de red al cargar el resumen.", true);
+  }
+}
+
+function hasRealIsbn(book) {
+  const isbn = String(book?.isbn || "").trim();
+  return Boolean(isbn) && !isLocalId(isbn);
+}
+
 function isbnCellHtml(book) {
-  if (isLocalId(book.isbn)) {
-    return `<span class="no-isbn" title="${escapeHtml(book.isbn)}">—</span>`;
+  if (!hasRealIsbn(book)) {
+    return `<span class="no-isbn">—</span>`;
   }
   return `<code>${escapeHtml(book.isbn)}</code>`;
 }
@@ -603,28 +789,38 @@ function updateViewChips() {
   viewChips.innerHTML = `${searchCluster}${groupCluster}${facetCluster}${clearAll}`;
 }
 
-function findBook(isbn) {
-  return books.find((book) => book.isbn === isbn);
+function findItem(id) {
+  return books.find((book) => book.id === id);
+}
+
+function findBook(id) {
+  return findItem(id);
 }
 
 function bookRowHtml(book) {
   const fav = Boolean(book.favourite);
-  const checked = selectedIsbns.has(book.isbn) ? "checked" : "";
+  const id = book.id;
+  const checked = selectedIds.has(id) ? "checked" : "";
+  const printCols = isPrintTab()
+    ? `<td class="col-isbn col-print">${isbnCellHtml(book)}</td>
+    <td class="col-dl col-print">${legalDepositCellHtml(book)}</td>`
+    : `<td class="col-isbn col-print hidden" hidden>—</td>
+    <td class="col-dl col-print hidden" hidden>—</td>`;
   return `
     <td class="col-select">
       <input
         type="checkbox"
         class="row-select"
-        data-select-isbn="${escapeHtml(book.isbn)}"
+        data-select-id="${escapeHtml(id)}"
         ${checked}
-        aria-label="Seleccionar ${escapeHtml(book.title || book.isbn)}"
+        aria-label="Seleccionar ${escapeHtml(book.title || id)}"
       />
     </td>
     <td class="col-fav">
       <button
         type="button"
         class="fav-btn${fav ? " is-on" : ""}"
-        data-fav-toggle="${escapeHtml(book.isbn)}"
+        data-fav-toggle="${escapeHtml(id)}"
         title="${fav ? "Quitar de favoritos" : "Marcar favorito"}"
         aria-pressed="${fav ? "true" : "false"}"
         aria-label="${fav ? "Quitar de favoritos" : "Marcar favorito"}"
@@ -632,22 +828,21 @@ function bookRowHtml(book) {
     </td>
     <td class="col-cover">${coverHtml(book, "cover thumb")}</td>
     <td class="col-title">
-      <button type="button" class="linkish" data-open="${escapeHtml(book.isbn)}">
+      <button type="button" class="linkish" data-open="${escapeHtml(id)}">
         ${escapeHtml(book.title)}
       </button>
     </td>
     <td class="col-authors">${labelsHtml(book.authors)}</td>
     <td class="col-year">${escapeHtml(book.publication_year ?? "—")}</td>
-    <td class="col-isbn">${isbnCellHtml(book)}</td>
-    <td class="col-dl">${legalDepositCellHtml(book)}</td>
+    ${printCols}
     <td class="col-genre">${labelsHtml(book.genre)}</td>
     <td class="col-location">${escapeHtml(book.location || "—")}</td>
     <td title="${escapeHtml(book.publisher || "")}">${escapeHtml(truncate(book.publisher, 22))}</td>
     <td class="col-collection" title="${escapeHtml(collectionDisplay(book))}">${escapeHtml(truncate(collectionDisplay(book) || "—", 28))}</td>
     <td title="${escapeHtml(book.notes || "")}">${escapeHtml(truncate(book.notes, 24))}</td>
     <td class="col-actions">
-      <button type="button" class="btn ghost compact" data-open="${escapeHtml(book.isbn)}">Ver</button>
-      <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.isbn)}" title="Eliminar">✕</button>
+      <button type="button" class="btn ghost compact" data-open="${escapeHtml(id)}">Ver</button>
+      <button type="button" class="btn danger compact" data-delete="${escapeHtml(id)}" title="Eliminar">✕</button>
     </td>
   `;
 }
@@ -768,7 +963,15 @@ function renderList() {
     : "";
   listMeta.textContent = terms.length
     ? `${rows.length} resultado${rows.length === 1 ? "" : "s"}${searchHint} · ${sortHint}${filterHint}${groupHint}`
-    : `${rows.length} libro${rows.length === 1 ? "" : "s"} · ${sortHint}${filterHint}${groupHint}`;
+    : `${rows.length} ítem${rows.length === 1 ? "" : "s"} · ${sortHint}${filterHint}${groupHint}`;
+
+  if (!rows.length) {
+    const label = MEDIA_TABS[activeTab]?.label || "categoría";
+    emptyState.textContent =
+      activeTab === "all"
+        ? "Aún no hay ítems. Añade el primero desde el formulario."
+        : `Aún no hay ítems en ${label}.`;
+  }
 
   updateSortButtons();
   updateGroupToggles();
@@ -786,18 +989,18 @@ function renderList() {
 }
 
 function selectedList() {
-  return [...selectedIsbns];
+  return [...selectedIds];
 }
 
 function pruneSelection() {
-  const known = new Set(books.map((book) => book.isbn));
-  for (const isbn of [...selectedIsbns]) {
-    if (!known.has(isbn)) selectedIsbns.delete(isbn);
+  const known = new Set(books.map((book) => book.id));
+  for (const isbn of [...selectedIds]) {
+    if (!known.has(isbn)) selectedIds.delete(isbn);
   }
 }
 
 function updateBatchBar() {
-  const n = selectedIsbns.size;
+  const n = selectedIds.size;
   if (batchCount) {
     batchCount.textContent = n === 1 ? "1 seleccionado" : `${n} seleccionados`;
   }
@@ -807,7 +1010,7 @@ function updateBatchBar() {
   }
   if (selectAllVisible) {
     const visible = visibleBooks();
-    const selectedVisible = visible.filter((book) => selectedIsbns.has(book.isbn)).length;
+    const selectedVisible = visible.filter((book) => selectedIds.has(book.id)).length;
     selectAllVisible.checked = visible.length > 0 && selectedVisible === visible.length;
     selectAllVisible.indeterminate =
       selectedVisible > 0 && selectedVisible < visible.length;
@@ -816,12 +1019,12 @@ function updateBatchBar() {
 
 function setRowSelected(isbn, on) {
   if (!isbn) return;
-  if (on) selectedIsbns.add(isbn);
-  else selectedIsbns.delete(isbn);
+  if (on) selectedIds.add(isbn);
+  else selectedIds.delete(isbn);
 }
 
 function selectVisibleRows(on) {
-  visibleBooks().forEach((book) => setRowSelected(book.isbn, on));
+  visibleBooks().forEach((book) => setRowSelected(book.id, on));
   bookTbody.querySelectorAll(".row-select").forEach((cb) => {
     cb.checked = on;
   });
@@ -849,17 +1052,17 @@ async function batchDeleteSelected() {
     if (btn) btn.disabled = true;
     setStatus(`Eliminando ${isbns.length}…`);
     try {
-      const res = await fetch("/api/books/batch/delete", {
+      const res = await fetch("/api/items/batch/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isbns }),
+        body: JSON.stringify({ ids: isbns }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setStatus(data.detail || "No se pudo eliminar la selección.", true);
         return;
       }
-      isbns.forEach((isbn) => selectedIsbns.delete(isbn));
+      isbns.forEach((isbn) => selectedIds.delete(isbn));
       batchDialog.close();
       setStatus(`Eliminados: ${data.deleted}.`);
       await loadBooks();
@@ -911,10 +1114,10 @@ function openBatchFieldDialog() {
     if (applyBtn) applyBtn.disabled = true;
     setStatus(`Actualizando ${isbns.length}…`);
     try {
-      const res = await fetch("/api/books/batch/update", {
+      const res = await fetch("/api/items/batch/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isbns, fields: { [field]: value } }),
+        body: JSON.stringify({ ids: isbns, fields: { [field]: value } }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -933,19 +1136,22 @@ function openBatchFieldDialog() {
 }
 
 function batchEnrichSelected() {
-  const isbns = selectedList().filter((isbn) => !String(isbn).toUpperCase().startsWith("LOCAL-"));
-  if (!isbns.length) {
-    setStatus("La selección no tiene ISBN reales (solo LOCAL-…).", true);
+  const ids = selectedList().filter((id) => {
+    const item = findItem(id);
+    return item && hasRealIsbn(item);
+  });
+  if (!ids.length) {
+    setStatus("La selección no tiene ítems con ISBN (libros/revistas).", true);
     return;
   }
-  runEnrichPreview(isbns);
+  runEnrichPreview(ids);
 }
 
 async function toggleFavourite(isbn) {
   const book = findBook(isbn);
   if (!book) return;
   const next = !book.favourite;
-  const res = await fetch(`/api/books/${encodeURIComponent(isbn)}`, {
+  const res = await fetch(`/api/items/${encodeURIComponent(isbn)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ favourite: next }),
@@ -955,14 +1161,14 @@ async function toggleFavourite(isbn) {
     return;
   }
   const updated = await res.json();
-  const idx = books.findIndex((item) => item.isbn === isbn);
+  const idx = books.findIndex((item) => item.id === isbn);
   if (idx >= 0) books[idx] = updated;
   renderList();
 }
 
 async function deleteBook(isbn, title) {
   if (!confirm(`¿Eliminar “${title}” del inventario?`)) return false;
-  const res = await fetch(`/api/books/${encodeURIComponent(isbn)}`, { method: "DELETE" });
+  const res = await fetch(`/api/items/${encodeURIComponent(isbn)}`, { method: "DELETE" });
   if (!res.ok && res.status !== 204) {
     setStatus("No se pudo eliminar el libro.", true);
     return false;
@@ -1237,6 +1443,7 @@ function openReview(isbn, meta) {
     const data = new FormData(form);
     const yearRaw = String(data.get("publication_year") || "").trim();
     const payload = {
+      media_type: activeTab === "magazine" ? "magazine" : "book",
       isbn: pendingIsbn,
       title: String(data.get("title") || "").trim(),
       authors: normalizeLabelField(data.get("authors")),
@@ -1258,7 +1465,7 @@ function openReview(isbn, meta) {
     reviewStatus.classList.remove("error");
 
     try {
-      const res = await fetch("/api/books", {
+      const res = await fetch("/api/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -1293,26 +1500,37 @@ function openReview(isbn, meta) {
 
 function openManual() {
   pendingIsbn = "";
+  const mediaType = defaultMediaTypeForCreate();
+  const print = PRINT_TYPES.has(mediaType);
+  const typeOptions = Object.entries(MEDIA_LABELS)
+    .map(([value, label]) => `<option value="${value}"${value === mediaType ? " selected" : ""}>${label}</option>`)
+    .join("");
+  const authorsLabel = print ? "Autor(es)" : "Artista / créditos";
+  const publisherLabel = print ? "Editorial" : "Sello / estudio";
   reviewBody.innerHTML = `
     <div class="review-layout">
       <div class="detail-cover placeholder" aria-hidden="true">§</div>
       <div>
-        <p class="review-kicker">Alta manual · sin ISBN</p>
-        <h3 class="review-title">Libro, revista, manual o documento</h3>
-        <p class="authors">Ideal para ediciones con depósito legal u obras sin ISBN. Título obligatorio.</p>
+        <p class="review-kicker">Alta manual</p>
+        <h3 class="review-title">${escapeHtml(MEDIA_LABELS[mediaType] || "Ítem")}</h3>
+        <p class="authors">Título obligatorio.${print ? " ISBN opcional vía búsqueda en la pantalla principal." : ""}</p>
 
         <form id="review-form" class="review-form">
+          <label class="field">
+            <span>Tipo</span>
+            <select name="media_type">${typeOptions}</select>
+          </label>
           <label class="field">
             <span>Título</span>
             <input name="title" type="text" required autofocus placeholder="Nombre del ítem" />
           </label>
           <label class="field">
-            <span>Autor(es)</span>
-            <input name="authors" type="text" placeholder="Apellido, Nombre; Otro autor…" />
+            <span>${authorsLabel}</span>
+            <input name="authors" type="text" placeholder="${print ? "Apellido, Nombre; Otro autor…" : "Artista, banda, director…"}" />
           </label>
-          <label class="field">
+          <label class="field${print ? "" : " hidden"}" ${print ? "" : "hidden"}>
             <span>Depósito legal</span>
-            <input name="legal_deposit" type="text" placeholder="B. 7528-1969" />
+            <input name="legal_deposit" type="text" placeholder="B. 7528-1969" ${print ? "" : "disabled"} />
           </label>
           <div class="review-grid">
             <label class="field">
@@ -1320,7 +1538,7 @@ function openManual() {
               <input name="publication_year" type="number" min="1000" max="2100" />
             </label>
             <label class="field">
-              <span>Editorial</span>
+              <span>${publisherLabel}</span>
               <input name="publisher" type="text" />
             </label>
           </div>
@@ -1380,6 +1598,7 @@ function openManual() {
     const data = new FormData(form);
     const yearRaw = String(data.get("publication_year") || "").trim();
     const payload = {
+      media_type: String(data.get("media_type") || defaultMediaTypeForCreate()).trim(),
       title: String(data.get("title") || "").trim(),
       authors: normalizeLabelField(data.get("authors")),
       legal_deposit: String(data.get("legal_deposit") || "").trim(),
@@ -1394,13 +1613,19 @@ function openManual() {
       ...readOriginFields(data),
     };
     if (yearRaw) payload.publication_year = Number(yearRaw);
+    if (!PRINT_TYPES.has(payload.media_type)) {
+      payload.legal_deposit = "";
+      delete payload.translators;
+      delete payload.original_title;
+      delete payload.original_year;
+    }
 
     saveBtn.disabled = true;
     reviewStatus.textContent = "Guardando…";
     reviewStatus.classList.remove("error");
 
     try {
-      const res = await fetch("/api/books", {
+      const res = await fetch("/api/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -1413,11 +1638,15 @@ function openManual() {
       }
       reviewDialog.close();
       setStatus(`Añadido: ${body.title}${body.location ? ` · ${body.location}` : ""}`);
-      clearSearch(false);
-      sortKey = "title";
-      sortDir = "asc";
-      suggestionsLoadedAt = 0;
-      await loadBooks();
+      if (body.media_type && MEDIA_TABS[body.media_type]) {
+        setActiveTab(body.media_type);
+      } else {
+        clearSearch(false);
+        sortKey = "title";
+        sortDir = "asc";
+        suggestionsLoadedAt = 0;
+        await loadBooks();
+      }
     } catch {
       reviewStatus.textContent = "Error de red al guardar.";
       reviewStatus.classList.add("error");
@@ -1458,11 +1687,15 @@ function openDetail(book) {
           </div>
           <dl class="detail-grid detail-grid-2">
             <div>
+              <dt>Tipo</dt>
+              <dd>${escapeHtml(MEDIA_LABELS[book.media_type] || book.media_type || "book")}</dd>
+            </div>
+            <div>
               <dt>ISBN</dt>
               <dd>${
-                isLocalId(book.isbn)
-                  ? `<span class="no-isbn" title="${escapeHtml(book.isbn)}">Sin ISBN</span>`
-                  : escapeHtml(book.isbn)
+                hasRealIsbn(book)
+                  ? escapeHtml(book.isbn)
+                  : `<span class="no-isbn">Sin ISBN</span>`
               }</dd>
             </div>
             <div><dt>Fuente</dt><dd>${escapeHtml(book.source || "—")}</dd></div>
@@ -1505,7 +1738,7 @@ function openDetail(book) {
           }
           <div class="detail-actions">
             <button type="submit" class="btn primary compact" title="Ctrl+Enter">Guardar cambios</button>
-            <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.isbn)}">Eliminar</button>
+            <button type="button" class="btn danger compact" data-delete="${escapeHtml(book.id)}">Eliminar</button>
           </div>
           <p id="detail-status" class="status" role="status"></p>
         </form>
@@ -1545,7 +1778,7 @@ function openDetail(book) {
       detailStatus.classList.add("error");
       return;
     }
-    const res = await fetch(`/api/books/${encodeURIComponent(book.isbn)}`, {
+    const res = await fetch(`/api/items/${encodeURIComponent(book.id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -1556,7 +1789,7 @@ function openDetail(book) {
       return;
     }
     const updated = await res.json();
-    const idx = books.findIndex((item) => item.isbn === book.isbn);
+    const idx = books.findIndex((item) => item.id === book.id);
     if (idx >= 0) books[idx] = updated;
     Object.assign(book, updated);
     suggestionsLoadedAt = 0;
@@ -1566,7 +1799,7 @@ function openDetail(book) {
   });
 
   detailBody.querySelector("[data-delete]")?.addEventListener("click", async () => {
-    const ok = await deleteBook(book.isbn, book.title);
+    const ok = await deleteBook(book.id, book.title);
     if (ok) detailDialog.close();
   });
 
@@ -1575,24 +1808,31 @@ function openDetail(book) {
 }
 
 async function loadBooks() {
-  const params = new URLSearchParams({ limit: "200" });
+  if (activeTab === "overview") {
+    await loadOverview();
+    return;
+  }
+  const params = new URLSearchParams({ limit: "500" });
   for (const term of activeSearchTerms()) {
     params.append("q", term);
   }
-  const res = await fetch(`/api/books?${params}`);
+  const mediaType = currentMediaType();
+  if (mediaType) params.set("media_type", mediaType);
+  const res = await fetch(`/api/items?${params}`);
   if (!res.ok) {
     setStatus("Error al cargar el inventario.", true);
     return;
   }
   books = await res.json();
   pruneSelection();
+  updatePrintColumns();
   renderList();
 }
 
 bookTbody.addEventListener("change", (event) => {
   const cb = event.target.closest(".row-select");
   if (!cb) return;
-  setRowSelected(cb.getAttribute("data-select-isbn"), cb.checked);
+  setRowSelected(cb.getAttribute("data-select-id"), cb.checked);
   updateBatchBar();
 });
 
@@ -1628,7 +1868,7 @@ bookTbody.addEventListener("click", async (event) => {
   const book = findBook(isbn);
   if (!book) return;
   if (target.hasAttribute("data-delete")) {
-    await deleteBook(book.isbn, book.title);
+    await deleteBook(book.id, book.title);
     return;
   }
   openDetail(book);
@@ -1692,12 +1932,15 @@ lookupForm.addEventListener("submit", async (event) => {
   setStatus("Consultando catálogos online…");
 
   try {
-    const existing = await fetch(`/api/books/${encodeURIComponent(isbn)}`);
-    if (existing.ok) {
-      const book = await existing.json();
-      setStatus(`Ya está en inventario: ${book.title}`, true);
-      openDetail(book);
-      return;
+    const existingRes = await fetch(`/api/items?${new URLSearchParams({ q: isbn, limit: "50" })}`);
+    if (existingRes.ok) {
+      const matches = await existingRes.json();
+      const book = matches.find((item) => String(item.isbn || "").toUpperCase() === isbn.replace(/[^0-9Xx]/g, "").toUpperCase());
+      if (book) {
+        setStatus(`Ya está en inventario: ${book.title}`, true);
+        openDetail(book);
+        return;
+      }
     }
 
     const res = await fetch(`/api/lookup/${encodeURIComponent(isbn)}`);
@@ -1719,6 +1962,40 @@ lookupForm.addEventListener("submit", async (event) => {
 manualBtn?.addEventListener("click", () => {
   setStatus("Alta manual: rellena título y el resto a mano.");
   openManual();
+});
+
+addManualMediaBtn?.addEventListener("click", () => {
+  setStatus("Alta manual: rellena título y el resto a mano.");
+  openManual();
+});
+
+catalogNav?.addEventListener("click", (event) => {
+  const tabBtn = event.target.closest("[data-tab]");
+  if (!tabBtn) return;
+  setActiveTab(tabBtn.getAttribute("data-tab"));
+});
+
+overviewPanel?.addEventListener("click", (event) => {
+  const typeBtn = event.target.closest("[data-goto-tab]");
+  if (typeBtn) {
+    setActiveTab(typeBtn.getAttribute("data-goto-tab"));
+    return;
+  }
+  const locBtn = event.target.closest("[data-goto-location]");
+  if (!locBtn) return;
+  const raw = locBtn.getAttribute("data-goto-location") ?? "";
+  const label = locBtn.getAttribute("data-location-label") || raw || "(sin ubicación)";
+  activeTab = "all";
+  saveActiveTab();
+  facetFilters = [
+    {
+      field: "location",
+      key: groupKey(raw, "location"),
+      label,
+    },
+  ];
+  saveViewState();
+  setActiveTab("all");
 });
 
 searchInput.addEventListener("input", () => {
@@ -1749,7 +2026,7 @@ async function exportInventory(format) {
     btn.disabled = true;
   });
   try {
-    const res = await fetch(`/api/export/books?format=${encodeURIComponent(format)}`);
+    const res = await fetch(`/api/export/items?format=${encodeURIComponent(format)}`);
     if (!res.ok) {
       setStatus("No se pudo exportar el inventario.", true);
       return;
@@ -1757,7 +2034,7 @@ async function exportInventory(format) {
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";
     const match = disposition.match(/filename="?([^"]+)"?/);
-    const filename = match?.[1] || `alejandrisbn-books.${format}`;
+    const filename = match?.[1] || `alejandrisbn-items.${format}`;
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -1793,7 +2070,7 @@ async function importInventoryFile(file) {
   try {
     const body = new FormData();
     body.append("file", file, file.name);
-    const res = await fetch("/api/import/books", { method: "POST", body });
+    const res = await fetch("/api/import/items", { method: "POST", body });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const detail = Array.isArray(data.detail)
@@ -1808,7 +2085,7 @@ async function importInventoryFile(file) {
     );
     await loadBooks();
     if (data.inserted > 0) {
-      offerEnrichAfterImport(data.inserted_isbns || []);
+      offerEnrichAfterImport(data.inserted_ids || []);
     }
   } catch {
     setStatus("Error de red al importar.", true);
@@ -1886,21 +2163,19 @@ function truncateText(value, max = 120) {
   return `${text.slice(0, max - 1)}…`;
 }
 
-function offerEnrichAfterImport(isbns) {
+function offerEnrichAfterImport(ids) {
   if (!enrichDialog || !enrichBody) return;
-  const realIsbns = (Array.isArray(isbns) ? isbns : []).filter(
-    (isbn) => !String(isbn).toUpperCase().startsWith("LOCAL-"),
-  );
-  if (!realIsbns.length) return;
+  const realIds = (Array.isArray(ids) ? ids : []).filter(Boolean);
+  if (!realIds.length) return;
 
   enrichBody.innerHTML = `
     <h3 class="enrich-title">Importación lista</h3>
     <p class="enrich-meta">
-      Se añadieron ${realIsbns.length} registro(s) con ISBN.
-      ¿Buscar online datos faltantes (autor, año, portada…) para <strong>todos ellos</strong>
+      Se añadieron ${realIds.length} registro(s).
+      ¿Buscar online datos faltantes (autor, año, portada…) para los que tengan ISBN
       y revisar sugerencias antes de aplicarlas?
       Solo se proponen valores para <strong>campos vacíos</strong> (no corrige datos ya rellenados).
-      ${realIsbns.length > 20 ? " Puede tardar un rato." : ""}
+      ${realIds.length > 20 ? " Puede tardar un rato." : ""}
     </p>
     <div class="enrich-actions">
       <button type="button" class="btn ghost" data-enrich-close>Ahora no</button>
@@ -1909,7 +2184,7 @@ function offerEnrichAfterImport(isbns) {
   enrichDialog.showModal();
   enrichBody.querySelector("[data-enrich-close]")?.addEventListener("click", () => enrichDialog.close());
   enrichBody.querySelector("#enrich-start-btn")?.addEventListener("click", () => {
-    runEnrichPreview(realIsbns);
+    runEnrichPreview(realIds);
   });
 }
 
@@ -1945,7 +2220,8 @@ function renderEnrichResults(suggestions, scanned, failed) {
   for (const item of actionable) {
     const card = document.createElement("article");
     card.className = "enrich-card";
-    card.dataset.isbn = item.isbn;
+    card.dataset.id = item.id || "";
+    card.dataset.isbn = item.isbn || "";
     const fieldsHtml = item.fields
       .map((field, idx) => {
         const label = ENRICH_FIELD_LABELS[field.name] || field.name;
@@ -1992,10 +2268,10 @@ function renderEnrichResults(suggestions, scanned, failed) {
   setStatus(`Sugerencias listas: ${actionable.length} libro(s).`);
 }
 
-async function runEnrichPreview(isbns) {
+async function runEnrichPreview(ids) {
   if (!enrichDialog || !enrichBody) return;
-  if (!Array.isArray(isbns) || !isbns.length) {
-    setStatus("Selecciona al menos un libro con ISBN real.", true);
+  if (!Array.isArray(ids) || !ids.length) {
+    setStatus("Selecciona al menos un libro/revista con ISBN.", true);
     return;
   }
   const batchEnrichBtn = document.getElementById("batch-enrich");
@@ -2006,12 +2282,19 @@ async function runEnrichPreview(isbns) {
   enrichSearchActive = true;
   setStatus("Consultando catálogos online…");
   enrichDialog.showModal();
-  setEnrichProgress({ current: 0, total: 0, label: "Preparando lista de libros…", found: 0, failed: 0 });
+  setEnrichProgress({ current: 0, total: 0, label: "Preparando lista…", found: 0, failed: 0 });
 
   try {
-    const items = isbns
-      .filter((isbn) => !String(isbn).toUpperCase().startsWith("LOCAL-"))
-      .map((isbn) => ({ isbn, title: "" }));
+    const items = ids
+      .map((id) => {
+        const found = findItem(id);
+        return {
+          id,
+          isbn: found?.isbn || "",
+          title: found?.title || "",
+        };
+      })
+      .filter((item) => item.id);
 
     if (!items.length) {
       enrichSearchActive = false;
@@ -2028,7 +2311,7 @@ async function runEnrichPreview(isbns) {
       if (signal.aborted) break;
 
       const item = items[i];
-      const label = `Consultando catálogos… ${truncateText(item.title || item.isbn, 48)}`;
+      const label = `Consultando catálogos… ${truncateText(item.title || item.isbn || item.id, 48)}`;
       setEnrichProgress({
         current: i,
         total,
@@ -2043,7 +2326,7 @@ async function runEnrichPreview(isbns) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            isbns: [item.isbn],
+            ids: [item.id],
             fill_empty_only: true,
           }),
           signal,
@@ -2052,6 +2335,7 @@ async function runEnrichPreview(isbns) {
         if (!res.ok) {
           failed += 1;
           suggestions.push({
+            id: item.id,
             isbn: item.isbn,
             title: item.title || "",
             lookup_source: "",
@@ -2075,7 +2359,7 @@ async function runEnrichPreview(isbns) {
       setEnrichProgress({
         current: i + 1,
         total,
-        label: `Listo: ${truncateText(item.title || item.isbn, 48)}`,
+        label: `Listo: ${truncateText(item.title || item.isbn || item.id, 48)}`,
         found,
         failed,
       });
@@ -2105,9 +2389,10 @@ async function applyEnrichFromDialog() {
   if (!list) return;
   const updates = [];
   list.querySelectorAll(".enrich-card").forEach((card) => {
+    const id = card.dataset.id;
     const isbn = card.dataset.isbn;
     const bookOn = card.querySelector("[data-book-toggle]")?.checked;
-    if (!bookOn || !isbn) return;
+    if (!bookOn || (!id && !isbn)) return;
     const fields = {};
     card.querySelectorAll("input[data-field]:checked").forEach((cb) => {
       const name = cb.getAttribute("data-field");
@@ -2115,7 +2400,7 @@ async function applyEnrichFromDialog() {
         fields[name] = card._fieldMap[name];
       }
     });
-    if (Object.keys(fields).length) updates.push({ isbn, fields });
+    if (Object.keys(fields).length) updates.push({ id, isbn, fields });
   });
 
   if (!updates.length) {
@@ -2222,4 +2507,7 @@ themeToggle?.addEventListener("click", () => {
 
 applyTheme(currentTheme());
 loadViewState();
-loadBooks();
+loadActiveTab();
+updateGroupToggles();
+updateClearSearchVisibility();
+setActiveTab(activeTab);

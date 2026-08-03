@@ -30,6 +30,7 @@ SEARCH_COLUMNS = [
     "volume",
     "translators",
     "original_title",
+    "media_type",
 ]
 
 

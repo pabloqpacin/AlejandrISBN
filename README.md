@@ -1,6 +1,6 @@
 # AlejandrISBN
 
-Inventario lean de biblioteca: guarda libros por ISBN y completa título, autor, año, género y más desde catálogos públicos (Open Library + Google Books).
+Inventario lean de biblioteca y multimedia: libros, revistas, CDs, DVDs, VHS y cassettes. Los libros/revistas pueden darse de alta por ISBN (metadatos online); el resto es alta manual.
 
 **Licencia:** MIT · **Self-host:** [guía Windows (usuarios no técnicos)](docs/SELFHOSTING.md) · **Release/CI:** [docs/RELEASE.md](docs/RELEASE.md)
 
@@ -9,6 +9,12 @@ Inventario lean de biblioteca: guarda libros por ISBN y completa título, autor,
 - **API:** FastAPI + Uvicorn
 - **DB:** PostgreSQL 16 (Docker) **o** SQLite (modo escritorio / PCs modestos)
 - **Frontend:** HTML / CSS / JS vanilla, servido por la misma API (`/` y `/static`)
+
+## Modelo
+
+Cada registro es un **ítem** con `id` UUID. El campo `isbn` es opcional y único (solo libros/revistas). Al arrancar, si existe la tabla legacy `books`, se migra automáticamente a `items` (los `LOCAL-*` pasan a `isbn = null`).
+
+Tipos (`media_type`): `book`, `magazine`, `cd`, `dvd`, `vhs`, `cassette`.
 
 ## Arranque rápido
 
@@ -54,7 +60,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 ## Bootstrap DB / importar inventario
 
 - **Primer arranque del volumen:** SQL en `postgres/init/` (entrypoint oficial de Postgres).
-- **Restaurar inventario:** en la UI, **Importar** (JSON/CSV exportado). Luego **Completar online** si quieres rellenar vacíos.
+- **Restaurar inventario:** en la UI, **Importar** (JSON/CSV exportado). Acepta el formato nuevo `{"items":[…]}` y el legacy `{"books":[…]}`. Luego **Completar online** si quieres rellenar vacíos (solo ítems con ISBN).
 
 ## Arranque (local, desarrollo)
 
@@ -74,25 +80,36 @@ Docs: http://localhost:8000/docs
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| `GET` | `/api/books?q=` | Listar / buscar |
-| `GET` | `/api/books/{isbn}` | Detalle |
-| `POST` | `/api/books` | Añadir por ISBN (lookup) o sin ISBN (`title` obligatorio) |
-| `PATCH` | `/api/books/{isbn}` | Actualizar campos |
-| `DELETE` | `/api/books/{isbn}` | Eliminar |
-| `GET` | `/api/export/books?format=json\|csv` | Descargar inventario (JSON o CSV) |
-| `POST` | `/api/import/books` | Importar JSON/CSV (multipart `file`, sin red) |
-| `POST` | `/api/enrich/preview` | Sugerencias online para campos vacíos |
+| `GET` | `/api/stats` | Totales por tipo y por ubicación |
+| `GET` | `/api/items?q=&media_type=` | Listar / buscar |
+| `GET` | `/api/items/{id}` | Detalle |
+| `POST` | `/api/items` | Alta (ISBN lookup solo `book`/`magazine`; resto manual) |
+| `PATCH` | `/api/items/{id}` | Actualizar campos |
+| `DELETE` | `/api/items/{id}` | Eliminar |
+| `POST` | `/api/items/batch/delete` | Borrado masivo (`ids`) |
+| `POST` | `/api/items/batch/update` | Actualización masiva (`ids` + `fields`) |
+| `GET` | `/api/export/items?format=json\|csv` | Descargar inventario |
+| `POST` | `/api/import/items` | Importar JSON/CSV (multipart `file`) |
+| `POST` | `/api/enrich/preview` | Sugerencias online para campos vacíos (`ids`) |
 | `POST` | `/api/enrich/apply` | Aplicar campos confirmados |
-| `GET` | `/api/lookup/{isbn}` | Preview sin guardar |
+| `GET` | `/api/lookup/{isbn}` | Preview ISBN sin guardar |
+
+Las rutas legacy `/api/export/books` y `/api/import/books` siguen redirigidas al flujo de ítems.
 
 ### Ejemplo POST
 
 ```bash
-curl -X POST http://localhost:8000/api/books \
+# Libro por ISBN
+curl -X POST http://localhost:8000/api/items \
   -H 'Content-Type: application/json' \
-  -d '{"isbn":"9780143127550","notes":"Estantería A1"}'
+  -d '{"media_type":"book","isbn":"9780143127550","notes":"Estantería A1"}'
+
+# CD manual
+curl -X POST http://localhost:8000/api/items \
+  -H 'Content-Type: application/json' \
+  -d '{"media_type":"cd","title":"Nevermind","authors":"Nirvana","location":"Caja 1"}'
 ```
 
 ## Columnas
 
-`isbn`, `title`, `authors`, `publication_year`, `genre`, `publisher`, `cover_url`, `description`, `location`, `notes`, `legal_deposit`, `favourite`, `source`, `created_at`, `updated_at`
+`id`, `media_type`, `isbn`, `title`, `authors`, `publication_year`, `genre`, `publisher`, `cover_url`, `description`, `location`, `notes`, `legal_deposit`, `collection`, `volume`, `favourite`, `source`, `created_at`, `updated_at`

@@ -14,13 +14,15 @@ router = APIRouter(prefix="/api/enrich", tags=["enrich"])
 
 
 class EnrichPreviewRequest(BaseModel):
-    isbns: Optional[list[str]] = None
+    ids: Optional[list[str]] = None
+    isbns: Optional[list[str]] = None  # legacy
     fill_empty_only: bool = True
     limit: Optional[int] = Field(default=None, ge=1)
 
 
 class EnrichApplyItem(BaseModel):
-    isbn: str
+    id: Optional[str] = None
+    isbn: Optional[str] = None  # legacy
     fields: dict[str, Any]
 
 
@@ -31,17 +33,21 @@ class EnrichApplyRequest(BaseModel):
 
 @router.post("/candidates")
 async def enrich_candidates(payload: EnrichPreviewRequest, db=Depends(get_db)) -> dict:
-    """List books that may need enrichment (no online calls)."""
-    books = await enrich_svc.select_candidate_isbns(
+    """List items that may need enrichment (no online calls)."""
+    items = await enrich_svc.select_candidate_items(
         db,
-        isbns=payload.isbns,
+        ids=payload.ids,
         limit=payload.limit,
     )
     return {
-        "count": len(books),
+        "count": len(items),
         "items": [
-            {"isbn": book["isbn"], "title": book.get("title") or ""}
-            for book in books
+            {
+                "id": item["id"],
+                "isbn": item.get("isbn") or "",
+                "title": item.get("title") or "",
+            }
+            for item in items
         ],
     }
 
@@ -52,6 +58,7 @@ async def enrich_preview(payload: EnrichPreviewRequest, db=Depends(get_db)) -> d
     try:
         return await enrich_svc.preview_enrichment(
             db,
+            ids=payload.ids,
             isbns=payload.isbns,
             fill_empty_only=payload.fill_empty_only,
             limit=payload.limit,
