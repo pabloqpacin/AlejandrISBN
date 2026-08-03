@@ -17,17 +17,20 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # App = API FastAPI + UI estática (mismo contenedor).
+  # Dev/self-host: siempre `docker compose up --build -d`.
+  # `up -d` solo NO rebuild; reusa la imagen local ya tageada.
+  # Tag local a propósito (no ghcr.io/...:latest) para no pisar builds con un pull remoto.
+  # Publicación a GHCR: workflow release.yml, no este compose.
   alejandrisbn:
     build: .
+    image: alejandrisbn:local
     container_name: alejandrisbn
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-alejandrisbn}:${POSTGRES_PASSWORD:-alejandrisbn}@db:5432/${POSTGRES_DB:-alejandrisbn}
       GOOGLE_BOOKS_API_KEY: ${GOOGLE_BOOKS_API_KEY:-}
-      SEED_DIR: /app/seed
     ports:
       - "8000:8000"
-    volumes:
-      - ./seed:/app/seed:ro
     depends_on:
       db:
         condition: service_healthy

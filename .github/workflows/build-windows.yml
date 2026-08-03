@@ -1,0 +1,94 @@
+# Build Windows desktop installer (PyInstaller + Inno Setup, free)
+
+name: build-windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $v = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $v = "0.0.0+${{ github.run_number }}"
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "MyAppVersion=$v"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Write VERSION for the desktop bundle
+        shell: pwsh
+        run: |
+          Set-Content -Path VERSION -Value "${{ steps.ver.outputs.version }}" -NoNewline
+          Get-Content VERSION
+
+      - name: Build with PyInstaller
+        run: pyinstaller alejandrisbn.spec
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found" }
+          & $iscc /DMyAppVersion="${{ steps.ver.outputs.version }}" packaging\windows\AlejandrISBN.iss
+          if (-not (Test-Path dist\AlejandrISBN-Setup.exe)) { throw "Setup.exe missing" }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlejandrISBN-windows
+          path: dist/AlejandrISBN-Setup.exe
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AlejandrISBN-Setup.exe
+          generate_release_notes: true
+          body: |
+            ## Windows — instalador
+
+            1. Descarga **`AlejandrISBN-Setup.exe`**
+            2. Ejecútalo (no hace falta ser administrador)
+            3. Se instala en `%LOCALAPPDATA%\Programs\AlejandrISBN`
+            4. Icono en Escritorio / menú Inicio
+            5. Puedes borrar el Setup descargado
+
+            Para salir: cierra la ventanita de AlejandrISBN.
+
+            **Datos** (no se borran al desinstalar): `%LOCALAPPDATA%\AlejandrISBN\`
+
+            **Importar JSON/CSV:** con la app abierta, usa **Importar** (junto a Exportar).
+
+            Self-host con Docker: clona el repo y `docker compose up --build -d` (ver `docs/SELFHOSTING.md`).
