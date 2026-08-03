@@ -1,18 +1,21 @@
 """
 Desktop shell: no Docker, no system Python required when frozen with PyInstaller.
 
-- Starts the FastAPI/Uvicorn server in a background thread (SQLite).
-- Opens the browser.
-- Shows a small control window; closing it stops the app.
-- Optionally creates a Desktop shortcut on first run (Windows).
+Architecture (Windows-safe):
+- Parent process: Tk control window + browser + Desktop shortcut
+- Child process (``--serve``): Uvicorn in the *main* thread (required on Windows;
+  running Uvicorn in a background thread often dies silently)
+
+Closing the window stops the child server.
 """
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import socket
+import subprocess
 import sys
-import threading
 import time
 import traceback
 import webbrowser
@@ -22,6 +25,29 @@ from pathlib import Path
 HOST = "127.0.0.1"
 PORT = 8000
 URL = f"http://{HOST}:{PORT}"
+
+
+def _data_dir() -> Path:
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    path = base / "AlejandrISBN"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _log_path() -> Path:
+    return _data_dir() / "desktop.log"
+
+
+def _log(msg: str) -> None:
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n"
+    try:
+        with _log_path().open("a", encoding="utf-8") as fh:
+            fh.write(line)
+    except Exception:
+        pass
 
 
 def _app_dir() -> Path:
@@ -39,7 +65,6 @@ def _configure_env() -> None:
         os.environ["ALEJANDRISBN_BACKEND"] = "sqlite"
 
     app_dir = _app_dir()
-    # Writable folder next to the .exe (user can drop JSON backups here)
     user_seed = app_dir / "seed"
     bundled_seed = None
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -63,22 +88,35 @@ def _port_free(port: int) -> bool:
             return False
 
 
-def _wait_until_up(timeout: float = 30.0) -> bool:
+def _wait_until_up(timeout: float = 45.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             with socket.create_connection((HOST, PORT), timeout=0.5):
                 return True
         except OSError:
-            time.sleep(0.2)
+            time.sleep(0.25)
     return False
+
+
+def _show_error(msg: str) -> None:
+    _log(f"ERROR: {msg}")
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, msg[:1500], "AlejandrISBN", 0x10)
+            return
+        except Exception:
+            pass
+    print(msg, file=sys.stderr)
 
 
 def _ensure_desktop_shortcut() -> None:
     if os.name != "nt" or not getattr(sys, "frozen", False):
         return
 
-    marker = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "AlejandrISBN" / ".desktop-shortcut-ok"
+    marker = _data_dir() / ".desktop-shortcut-ok"
     if marker.exists():
         return
 
@@ -90,7 +128,6 @@ def _ensure_desktop_shortcut() -> None:
         return
 
     import json
-    import subprocess
 
     lnk = desktop / "AlejandrISBN.lnk"
     target = json.dumps(str(exe))
@@ -111,27 +148,79 @@ def _ensure_desktop_shortcut() -> None:
             capture_output=True,
             text=True,
         )
-        marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("1", encoding="utf-8")
+        _log(f"Desktop shortcut created: {lnk}")
+    except Exception as exc:
+        _log(f"Shortcut failed: {exc}")
+
+
+def _serve_forever() -> int:
+    """Run Uvicorn in this process (must be main thread — used by ``--serve`` child)."""
+    _configure_env()
+    _log(f"serve start backend={os.environ.get('ALEJANDRISBN_BACKEND')} cwd={os.getcwd()}")
+    try:
+        import asyncio
+
+        import uvicorn
+        from app.main import app
+
+        # Explicit asyncio loop: avoid Windows Proactor quirks with defaults in threads.
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+        config = uvicorn.Config(
+            app,
+            host=HOST,
+            port=PORT,
+            log_level="info",
+            access_log=True,
+            loop="asyncio",
+            http="h11",
+            lifespan="on",
+        )
+        server = uvicorn.Server(config)
+        asyncio.run(server.serve())
+        return 0
     except Exception:
-        pass
+        err = traceback.format_exc()
+        _log(err)
+        raise
 
 
-def _run_server() -> None:
-    import uvicorn
-    from app.main import app
+def _serve_command() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [str(sys.executable), "--serve"]
+    return [sys.executable, "-m", "app.desktop_app", "--serve"]
 
-    uvicorn.run(app, host=HOST, port=PORT, log_level="warning", access_log=False)
+
+def _stop_process(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    if os.name == "nt" and proc.pid:
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+            )
+        except Exception:
+            pass
 
 
-def _show_window() -> None:
+def _show_window(on_close) -> None:
     import tkinter as tk
-    from tkinter import messagebox
 
     root = tk.Tk()
     root.title("AlejandrISBN")
     root.resizable(False, False)
-    root.attributes("-topmost", False)
 
     frame = tk.Frame(root, padx=20, pady=16)
     frame.pack()
@@ -145,66 +234,109 @@ def _show_window() -> None:
     ).pack(anchor="w", pady=(8, 12))
     tk.Label(frame, text=URL, fg="#1f4a36", font=("Segoe UI", 10)).pack(anchor="w")
 
-    def open_browser() -> None:
-        webbrowser.open(URL)
+    tk.Button(frame, text="Abrir en el navegador", command=lambda: webbrowser.open(URL)).pack(
+        anchor="w", pady=(14, 0)
+    )
 
-    btn = tk.Button(frame, text="Abrir en el navegador", command=open_browser)
-    btn.pack(anchor="w", pady=(14, 0))
-
-    def on_close() -> None:
+    def handle_close() -> None:
+        on_close()
         root.destroy()
 
-    root.protocol("WM_DELETE_WINDOW", on_close)
-
-    # Center roughly
+    root.protocol("WM_DELETE_WINDOW", handle_close)
     root.update_idletasks()
     w, h = root.winfo_width(), root.winfo_height()
     x = (root.winfo_screenwidth() - w) // 2
     y = (root.winfo_screenheight() - h) // 3
     root.geometry(f"+{x}+{y}")
+    root.mainloop()
 
+
+def _tail_log(max_chars: int = 1200) -> str:
+    path = _log_path()
+    if not path.exists():
+        return "(sin log)"
     try:
-        root.mainloop()
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return text[-max_chars:] if text else "(log vacío)"
     except Exception as exc:
-        messagebox.showerror("AlejandrISBN", str(exc))
+        return f"(no se pudo leer el log: {exc})"
 
 
 def main() -> int:
+    multiprocessing.freeze_support()
+
+    if "--serve" in sys.argv:
+        try:
+            return _serve_forever()
+        except Exception:
+            return 1
+
     _configure_env()
+    _log("launcher start")
 
     if not _port_free(PORT):
-        # Already running — just open the UI
         webbrowser.open(URL)
         _ensure_desktop_shortcut()
-        if os.name == "nt":
-            import ctypes
-
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"AlejandrISBN ya estaba en marcha.\nSe abrió {URL}",
-                "AlejandrISBN",
-                0x40,
-            )
+        _show_error(f"AlejandrISBN ya estaba en marcha (o el puerto {PORT} está ocupado).\nSe abrió {URL}")
         return 0
 
-    server = threading.Thread(target=_run_server, name="uvicorn", daemon=True)
-    server.start()
+    log_file = _log_path()
+    # Truncate previous run log for easier debugging
+    try:
+        log_file.write_text("", encoding="utf-8")
+    except Exception:
+        pass
+    _log("spawning --serve child")
 
-    if not _wait_until_up():
-        msg = "No se pudo arrancar el servidor en el puerto 8000."
-        if os.name == "nt":
-            import ctypes
+    creationflags = 0
+    if os.name == "nt":
+        # Detach from GUI console; keep stdout/stderr redirected to log
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-            ctypes.windll.user32.MessageBoxW(0, msg, "AlejandrISBN", 0x10)
-        else:
-            print(msg, file=sys.stderr)
+    child_log = log_file.open("a", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(
+            _serve_command(),
+            cwd=str(_app_dir()),
+            stdout=child_log,
+            stderr=subprocess.STDOUT,
+            creationflags=creationflags,
+            env=os.environ.copy(),
+        )
+    except Exception as exc:
+        child_log.close()
+        _show_error(f"No se pudo lanzar el servidor:\n{exc}")
         return 1
 
-    _ensure_desktop_shortcut()
-    webbrowser.open(URL)
-    _show_window()
-    # Window closed → process exit kills daemon thread
-    return 0
+    try:
+        if not _wait_until_up(timeout=60.0):
+            _stop_process(proc)
+            detail = _tail_log()
+            _show_error(
+                "No se pudo arrancar el servidor en el puerto 8000.\n\n"
+                f"Log: {log_file}\n\n"
+                f"{detail}"
+            )
+            return 1
+
+        if proc.poll() is not None:
+            _show_error(
+                f"El servidor se cerró solo (código {proc.returncode}).\n\n"
+                f"Log: {log_file}\n\n{_tail_log()}"
+            )
+            return 1
+
+        _ensure_desktop_shortcut()
+        webbrowser.open(URL)
+        _show_window(on_close=lambda: _stop_process(proc))
+        _stop_process(proc)
+        _log("launcher exit ok")
+        return 0
+    finally:
+        try:
+            child_log.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
@@ -212,13 +344,6 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception:
         err = traceback.format_exc()
-        if os.name == "nt":
-            try:
-                import ctypes
-
-                ctypes.windll.user32.MessageBoxW(0, err[-1000:], "AlejandrISBN — error", 0x10)
-            except Exception:
-                print(err, file=sys.stderr)
-        else:
-            print(err, file=sys.stderr)
+        _log(err)
+        _show_error(err[-1500:])
         raise SystemExit(1)
