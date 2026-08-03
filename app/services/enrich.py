@@ -28,8 +28,6 @@ ENRICHABLE_FIELDS = (
     "original_year",
 )
 
-DEFAULT_LIMIT = 25
-MAX_LIMIT = 100
 LOOKUP_CONCURRENCY = 3
 
 
@@ -100,38 +98,41 @@ async def select_candidate_isbns(
     db: Any,
     *,
     isbns: Optional[list[str]] = None,
-    limit: int = DEFAULT_LIMIT,
+    limit: Optional[int] = None,
 ) -> list[dict[str, Any]]:
-    """Load inventory rows eligible for enrichment."""
+    """Load inventory rows eligible for enrichment.
+
+    ``limit`` is optional; ``None`` means process the full candidate set.
+    """
     from app.db.common import record_to_dict
 
-    limit = max(1, min(int(limit), MAX_LIMIT))
+    capped = max(1, int(limit)) if limit is not None else None
 
     if isbns:
         books: list[dict[str, Any]] = []
-        for raw in isbns[:limit]:
+        for raw in isbns:
             key = str(raw or "").strip()
             if not key or is_local_id(key):
                 continue
             row = await db.fetchrow("SELECT * FROM books WHERE isbn = $1", key)
             if row:
                 books.append(record_to_dict(row))
+            if capped is not None and len(books) >= capped:
+                break
         return books
 
     rows = await db.fetch(
         """
         SELECT * FROM books
         ORDER BY updated_at DESC
-        LIMIT $1
-        """,
-        limit * 4,
+        """
     )
     candidates: list[dict[str, Any]] = []
     for row in rows:
         book = record_to_dict(row)
         if book_needs_enrichment(book):
             candidates.append(book)
-        if len(candidates) >= limit:
+        if capped is not None and len(candidates) >= capped:
             break
     return candidates
 
@@ -141,7 +142,7 @@ async def preview_enrichment(
     *,
     isbns: Optional[list[str]] = None,
     fill_empty_only: bool = True,
-    limit: int = DEFAULT_LIMIT,
+    limit: Optional[int] = None,
 ) -> dict[str, Any]:
     from app.services.isbn_lookup import lookup_isbn
 

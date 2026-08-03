@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/enrich", tags=["enrich"])
 class EnrichPreviewRequest(BaseModel):
     isbns: Optional[list[str]] = None
     fill_empty_only: bool = True
-    limit: int = Field(default=enrich_svc.DEFAULT_LIMIT, ge=1, le=enrich_svc.MAX_LIMIT)
+    limit: Optional[int] = Field(default=None, ge=1)
 
 
 class EnrichApplyItem(BaseModel):
