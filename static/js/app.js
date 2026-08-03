@@ -551,6 +551,115 @@ function hasRealIsbn(book) {
   return Boolean(isbn) && !isLocalId(isbn);
 }
 
+function hasCatalogIdentity(book) {
+  if (hasRealIsbn(book)) return true;
+  return Boolean(String(book?.legal_deposit || "").trim());
+}
+
+function fieldBlank(value) {
+  return value == null || String(value).trim() === "";
+}
+
+function fundamentalsComplete(book) {
+  if (!book || !hasCatalogIdentity(book)) return false;
+  const title = String(book.title || "").trim();
+  if (!title || (hasRealIsbn(book) && title.toUpperCase() === String(book.isbn).toUpperCase())) {
+    return false;
+  }
+  return (
+    !fieldBlank(book.authors) &&
+    !fieldBlank(book.publication_year) &&
+    !fieldBlank(book.publisher)
+  );
+}
+
+function needsOnlineEnrichment(book) {
+  return Boolean(book) && hasRealIsbn(book) && !fundamentalsComplete(book);
+}
+
+function enrichSkipReason(book) {
+  if (!book) return "No encontrado en el inventario";
+  if (!hasRealIsbn(book)) return "Sin ISBN — no se puede consultar online";
+  if (fundamentalsComplete(book)) {
+    return "Ya completo (título, autor, año, editorial + ISBN/DL)";
+  }
+  return null;
+}
+
+function classifyEnrichSelection(ids) {
+  const toQuery = [];
+  const toQueryItems = [];
+  const skipped = [];
+  for (const id of ids || []) {
+    const item = findItem(id);
+    const reason = enrichSkipReason(item);
+    if (reason) {
+      skipped.push({
+        id,
+        title: item?.title || id,
+        isbn: item?.isbn || "",
+        reason,
+      });
+    } else {
+      toQuery.push(id);
+      toQueryItems.push({
+        id,
+        title: item?.title || id,
+        isbn: item?.isbn || "",
+      });
+    }
+  }
+  return { toQuery, toQueryItems, skipped, selected: ids?.length || 0 };
+}
+
+function enrichAccountSummaryHtml(selected, skippedCount, queryItems = []) {
+  const querying = queryItems.length;
+  const queryList =
+    querying > 0
+      ? `<details class="enrich-query-list" open>
+          <summary>A consultar: <strong>${querying}</strong></summary>
+          <ul>
+            ${queryItems
+              .map((item) => {
+                const label = truncateText(item.title || item.isbn || item.id || "Ítem", 70);
+                const isbn = item.isbn ? ` · ${escapeHtml(item.isbn)}` : "";
+                return `<li><strong>${escapeHtml(label)}</strong>${isbn}</li>`;
+              })
+              .join("")}
+          </ul>
+        </details>`
+      : `<p class="enrich-meta enrich-query-empty">A consultar: <strong>0</strong></p>`;
+  return `
+    <p class="enrich-meta enrich-account">
+      Seleccionados: <strong>${selected}</strong>
+      —
+      Descartados: <strong>${skippedCount}</strong>
+      <span class="enrich-discard-hint">(completos o sin ISBN)</span>
+    </p>
+    ${queryList}`;
+}
+
+function enrichFailuresHtml(suggestions) {
+  const failures = (suggestions || []).filter((item) => item && item.error);
+  if (!failures.length) return "";
+  return `
+    <details class="enrich-failures" open>
+      <summary>Fallos (${failures.length})</summary>
+      <ul>
+        ${failures
+          .map((item) => {
+            const label = truncateText(item.title || item.isbn || item.id || "Ítem", 60);
+            const isbn = item.isbn ? ` · ${item.isbn}` : "";
+            return `<li>
+              <strong>${escapeHtml(label)}</strong>${escapeHtml(isbn)}
+              <span class="enrich-fail-reason">${escapeHtml(String(item.error))}</span>
+            </li>`;
+          })
+          .join("")}
+      </ul>
+    </details>`;
+}
+
 function placementDisplay(book) {
   const room = String(book?.room || "").trim();
   const furniture = String(book?.furniture || "").trim();
@@ -1181,15 +1290,13 @@ function openBatchFieldDialog() {
 }
 
 function batchEnrichSelected() {
-  const ids = selectedList().filter((id) => {
-    const item = findItem(id);
-    return item && hasRealIsbn(item);
-  });
-  if (!ids.length) {
-    setStatus("La selección no tiene ítems con ISBN (libros/revistas).", true);
+  const selectedIds = selectedList();
+  if (!selectedIds.length) {
+    setStatus("Selecciona al menos un ítem.", true);
     return;
   }
-  runEnrichPreview(ids);
+  const { toQuery, toQueryItems, skipped, selected } = classifyEnrichSelection(selectedIds);
+  runEnrichPreview(toQuery, { selected, skipped, toQueryItems });
 }
 
 async function toggleFavourite(isbn) {
@@ -2185,25 +2292,46 @@ function cancelEnrichSearch() {
   }
 }
 
-function setEnrichProgress({ current, total, label, found, failed }) {
+function setEnrichProgress({ current, total, label, found, failed, accountHtml = "", reset = false }) {
   if (!enrichBody) return;
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-  enrichBody.innerHTML = `
-    <h3 class="enrich-title">Completar online</h3>
-    <p class="enrich-loading" id="enrich-progress-label">
-      ${escapeHtml(label || "Preparando…")}
-    </p>
-    <div class="enrich-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
-      <div class="enrich-progress-bar" style="width:${pct}%"></div>
-    </div>
-    <p class="enrich-progress-meta">
-      ${total ? `${current} / ${total}` : "…"}
-      ${typeof found === "number" ? ` · ${found} con sugerencias` : ""}
-      ${typeof failed === "number" && failed > 0 ? ` · ${failed} sin datos` : ""}
-    </p>
-    <p class="enrich-meta">
-      Cerrar este diálogo <strong>detiene</strong> la búsqueda.
-    </p>`;
+  const metaBits = [
+    total ? `${current} / ${total}` : "…",
+    typeof found === "number" ? `${found} con sugerencias` : "",
+    typeof failed === "number" && failed > 0 ? `${failed} sin datos` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  if (reset || !enrichBody.querySelector("#enrich-progress-root")) {
+    enrichBody.innerHTML = `
+      <h3 class="enrich-title">Completar online</h3>
+      <div id="enrich-account-slot"></div>
+      <div id="enrich-progress-root">
+        <p class="enrich-loading" id="enrich-progress-label"></p>
+        <div class="enrich-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="enrich-progress-bar" id="enrich-progress-bar" style="width:0%"></div>
+        </div>
+        <p class="enrich-progress-meta" id="enrich-progress-meta"></p>
+        <p class="enrich-meta">
+          Cerrar este diálogo <strong>detiene</strong> la búsqueda.
+        </p>
+      </div>`;
+    const slot = enrichBody.querySelector("#enrich-account-slot");
+    if (slot && accountHtml) {
+      slot.innerHTML = accountHtml;
+      slot.dataset.ready = "1";
+    }
+  }
+
+  const labelEl = enrichBody.querySelector("#enrich-progress-label");
+  const barEl = enrichBody.querySelector("#enrich-progress-bar");
+  const metaEl = enrichBody.querySelector("#enrich-progress-meta");
+  const progressEl = enrichBody.querySelector(".enrich-progress");
+  if (labelEl) labelEl.textContent = label || "Preparando…";
+  if (barEl) barEl.style.width = `${pct}%`;
+  if (progressEl) progressEl.setAttribute("aria-valuenow", String(pct));
+  if (metaEl) metaEl.textContent = metaBits;
 }
 
 function truncateText(value, max = 120) {
@@ -2233,29 +2361,48 @@ function offerEnrichAfterImport(ids) {
   enrichDialog.showModal();
   enrichBody.querySelector("[data-enrich-close]")?.addEventListener("click", () => enrichDialog.close());
   enrichBody.querySelector("#enrich-start-btn")?.addEventListener("click", () => {
-    runEnrichPreview(realIds);
+    const { toQuery, toQueryItems, skipped, selected } = classifyEnrichSelection(realIds);
+    runEnrichPreview(toQuery, { selected, skipped, toQueryItems });
   });
 }
 
-function renderEnrichResults(suggestions, scanned, failed) {
+function renderEnrichResults(suggestions, scanned, failed, account = null) {
+  const accountHtml = account
+    ? enrichAccountSummaryHtml(
+        account.selected,
+        (account.skipped || []).length,
+        account.toQueryItems || [],
+      )
+    : "";
+  const failuresHtml = enrichFailuresHtml(suggestions);
   const actionable = (suggestions || []).filter((s) => (s.fields || []).length > 0);
   if (!actionable.length) {
     enrichBody.innerHTML = `
       <h3 class="enrich-title">Completar online</h3>
-      <p>No hay sugerencias nuevas (revisados ${scanned || 0}; fallos ${failed || 0}).</p>
+      ${accountHtml}
+      <p>No hay sugerencias nuevas (consultados ${scanned || 0}; fallos ${failed || 0}).</p>
+      ${failuresHtml}
       <div class="enrich-actions">
         <button type="button" class="btn ghost" data-enrich-close>Cerrar</button>
       </div>`;
-    setStatus("Sin sugerencias de enriquecimiento.");
+    setStatus(
+      failed
+        ? `Sin sugerencias. ${failed} fallo(s) al consultar.`
+        : account?.skipped?.length
+          ? `Sin sugerencias. Descartados ${account.skipped.length} de ${account.selected}.`
+          : "Sin sugerencias de enriquecimiento.",
+    );
     enrichBody.querySelector("[data-enrich-close]")?.addEventListener("click", () => enrichDialog.close());
     return;
   }
 
   enrichBody.innerHTML = `
     <h3 class="enrich-title">Completar online</h3>
+    ${accountHtml}
+    ${failuresHtml}
     <p class="enrich-meta">
       ${actionable.length} libro(s) con campos vacíos sugeridos
-      (revisados ${scanned}; fallos ${failed || 0}).
+      (consultados ${scanned}; fallos ${failed || 0}).
       Solo se rellenan <strong>campos vacíos</strong>; no se corrigen valores ya presentes.
       Desmarca lo que no quieras aplicar.
     </p>
@@ -2317,21 +2464,57 @@ function renderEnrichResults(suggestions, scanned, failed) {
   setStatus(`Sugerencias listas: ${actionable.length} libro(s).`);
 }
 
-async function runEnrichPreview(ids) {
+async function runEnrichPreview(ids, accountInfo = null) {
   if (!enrichDialog || !enrichBody) return;
+
+  const skipped = accountInfo?.skipped || [];
+  const selected = accountInfo?.selected ?? (Array.isArray(ids) ? ids.length : 0) + skipped.length;
+  const toQueryItems =
+    accountInfo?.toQueryItems ||
+    (Array.isArray(ids)
+      ? ids.map((id) => {
+          const found = findItem(id);
+          return { id, title: found?.title || id, isbn: found?.isbn || "" };
+        })
+      : []);
+  const account = {
+    selected,
+    skipped,
+    querying: Array.isArray(ids) ? ids.length : 0,
+    toQueryItems,
+  };
+  const accountHtml = enrichAccountSummaryHtml(account.selected, account.skipped.length, account.toQueryItems);
+
   if (!Array.isArray(ids) || !ids.length) {
-    setStatus("Selecciona al menos un libro/revista con ISBN.", true);
+    enrichDialog.showModal();
+    enrichSearchActive = false;
+    renderEnrichResults([], 0, 0, account);
+    setStatus(
+      account.skipped.length
+        ? `De ${account.selected} seleccionados, todos se descartaron (nada que consultar).`
+        : "Selecciona al menos un libro/revista.",
+      true,
+    );
     return;
   }
+
   const batchEnrichBtn = document.getElementById("batch-enrich");
   batchEnrichBtn && (batchEnrichBtn.disabled = true);
   cancelEnrichSearch();
   enrichAbortController = new AbortController();
   const { signal } = enrichAbortController;
   enrichSearchActive = true;
-  setStatus("Consultando catálogos online…");
+  setStatus(`Consultando catálogos… (${account.querying} de ${account.selected})`);
   enrichDialog.showModal();
-  setEnrichProgress({ current: 0, total: 0, label: "Preparando lista…", found: 0, failed: 0 });
+  setEnrichProgress({
+    current: 0,
+    total: 0,
+    label: "Preparando lista…",
+    found: 0,
+    failed: 0,
+    accountHtml,
+    reset: true,
+  });
 
   try {
     const items = ids
@@ -2347,7 +2530,7 @@ async function runEnrichPreview(ids) {
 
     if (!items.length) {
       enrichSearchActive = false;
-      renderEnrichResults([], 0, 0);
+      renderEnrichResults([], 0, 0, account);
       return;
     }
 
@@ -2367,8 +2550,9 @@ async function runEnrichPreview(ids) {
         label,
         found,
         failed,
+        accountHtml,
       });
-      setStatus(`Completar online: ${i + 1}/${total}`);
+      setStatus(`Completar online: ${i + 1}/${total} (de ${account.selected} seleccionados)`);
 
       try {
         const res = await fetch("/api/enrich/preview", {
@@ -2411,6 +2595,7 @@ async function runEnrichPreview(ids) {
         label: `Listo: ${truncateText(item.title || item.isbn || item.id, 48)}`,
         found,
         failed,
+        accountHtml,
       });
     }
 
@@ -2420,10 +2605,10 @@ async function runEnrichPreview(ids) {
     }
 
     enrichSearchActive = false;
-    renderEnrichResults(suggestions, total, failed);
+    renderEnrichResults(suggestions, total, failed, account);
   } catch {
     if (!signal.aborted) {
-      enrichBody.innerHTML = `<p class="status error">Error de red al consultar catálogos.</p>`;
+      enrichBody.innerHTML = `${accountHtml}<p class="status error">Error de red al consultar catálogos.</p>`;
       setStatus("Error de red al completar online.", true);
     }
   } finally {

@@ -28,6 +28,14 @@ ENRICHABLE_FIELDS = (
     "original_year",
 )
 
+# Required before we bother calling online catalogs.
+FUNDAMENTAL_FIELDS = (
+    "title",
+    "authors",
+    "publication_year",
+    "publisher",
+)
+
 LOOKUP_CONCURRENCY = 3
 
 
@@ -49,13 +57,31 @@ def field_is_empty(item: dict[str, Any], field: str) -> bool:
     return _is_blank(value)
 
 
+def has_catalog_identity(item: dict[str, Any]) -> bool:
+    """ISBN real o depósito legal — identidad mínima del ítem impreso."""
+    isbn = str(item.get("isbn") or "").strip()
+    if isbn and not is_local_id(isbn):
+        return True
+    return not _is_blank(item.get("legal_deposit"))
+
+
+def fundamentals_complete(item: dict[str, Any]) -> bool:
+    """True when title, authors, year, publisher and ISBN/DL are all present."""
+    if not has_catalog_identity(item):
+        return False
+    return all(not field_is_empty(item, field) for field in FUNDAMENTAL_FIELDS)
+
+
 def item_needs_enrichment(item: dict[str, Any]) -> bool:
+    """Only query online when fundamentals are incomplete and we have an ISBN to look up."""
     isbn = str(item.get("isbn") or "").strip()
     if not isbn or is_local_id(isbn):
         return False
     if not is_print_media(item.get("media_type") or "book"):
         return False
-    return any(field_is_empty(item, field) for field in ENRICHABLE_FIELDS)
+    if fundamentals_complete(item):
+        return False
+    return True
 
 
 # Back-compat names
