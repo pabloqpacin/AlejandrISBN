@@ -30,10 +30,13 @@ Tus libros se guardan en un volumen de Docker en tu PC. No se suben a ningún se
 
 ## Opción rápida — PC nuevo (script)
 
+> Estos scripts (`setup-windows.bat` / `.ps1`) **solo funcionan en Windows**. No se pueden ejecutar desde Linux ni desde una terminal WSL sobre la carpeta del repo.
+
 Si ya tienes la carpeta del proyecto (por ejemplo descargaste el **ZIP** desde GitHub, o te pasaron el repo en un USB):
 
-1. Entra en la carpeta `AlejandrISBN`
-2. Haz **doble clic** en `setup-windows.bat`
+1. Copia/extrae la carpeta a una ruta Windows normal, p. ej. `C:\Users\TU_USUARIO\Documents\AlejandrISBN`  
+   (evita rutas `\\wsl$\...` si el repo vive en Linux)
+2. En el Explorador de archivos, haz **doble clic** en `setup-windows.bat`
 3. Acepta el aviso de administrador (UAC)
 4. Espera a que instale **Brave**, **Git** y **Docker Desktop**
 5. Si Docker lo pide, **reinicia** el PC
@@ -41,6 +44,16 @@ Si ya tienes la carpeta del proyecto (por ejemplo descargaste el **ZIP** desde G
 7. Sigue por [Paso 3 — Clonar el repositorio](#paso-3--clonar-el-repositorio) (si llegaste con ZIP, puedes saltar el clone y usar esa carpeta) y luego `start.bat`
 
 El script usa `winget` (incluido en Windows reciente). Si falla, usa los pasos manuales de abajo.
+
+**Si el `.bat` no hace nada o se cierra:** clic derecho → *Ejecutar como administrador*. Si Windows dice que el archivo proviene de otro equipo: clic derecho → *Propiedades* → marca *Desbloquear* → Aceptar, y vuelve a ejecutarlo.
+
+**Plan B** (PowerShell **como administrador**):
+
+```powershell
+winget install -e --id Brave.Brave --accept-package-agreements --accept-source-agreements
+winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements
+winget install -e --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements
+```
 
 ---
 
