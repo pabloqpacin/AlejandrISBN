@@ -3,7 +3,7 @@
 Two implementations (selected in ``init_pool`` via ``app.db.config``):
 
 * **postgres** — Docker Compose / self-host (``DATABASE_URL=postgresql://…``)
-* **sqlite** — Windows desktop, ``start-desktop.bat``, or ``ALEJANDRISBN_BACKEND=sqlite``
+* **sqlite** — Windows desktop build, or ``ALEJANDRISBN_BACKEND=sqlite``
 
 Public API lives here; dialect code is in ``postgres.py`` / ``sqlite.py``.
 """

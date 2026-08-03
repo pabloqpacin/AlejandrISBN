@@ -12,25 +12,15 @@ Inventario lean de biblioteca: guarda libros por ISBN y completa título, autor,
 
 ## Arranque rápido
 
-### Windows — PCs modestos (sin Python ni Docker)
+### Windows — uso diario (sin Python ni Docker)
 
 1. Descarga **`AlejandrISBN-Setup.exe`** desde [Releases](https://github.com/pabloqpacin/AlejandrISBN/releases)
 2. Instálalo → icono en Escritorio; puedes borrar el Setup
 3. Cierra la ventanita de la app para salir
 
-(También hay ZIP portable.) Detalle: **[docs/SELFHOSTING.md](docs/SELFHOSTING.md)**
+Detalle: **[docs/SELFHOSTING.md](docs/SELFHOSTING.md)**
 
-### Windows — desarrollo con Python (SQLite)
-
-1. Instala [Python 3.11+](https://www.python.org/downloads/) (*Add to PATH*)
-2. Doble clic en **`start-desktop.bat`** → http://127.0.0.1:8000
-
-### Windows — Docker (≥8 GB RAM)
-
-1. (PC nuevo) `setup-windows.bat` → Brave, Git, Docker Desktop
-2. Abre Docker Desktop y doble clic en `start.bat`
-
-### Cualquier SO (Docker)
+### Cualquier SO — Docker (Postgres)
 
 ```bash
 git clone https://github.com/pabloqpacin/AlejandrISBN.git
@@ -41,16 +31,17 @@ docker compose up --build -d
 
 Abre http://localhost:8000
 
+En un PC Windows nuevo puedes instalar Brave + Git + Docker Desktop con `packaging/windows/setup-windows.bat` (solo prerequisitos; el arranque es `docker compose` como arriba).
+
 Los datos viven en el volumen nombrado `alejandrisbn_pgdata` (no se borran con `docker compose down`).
 
 ```bash
 docker compose down          # para contenedores, conserva el volumen
 docker compose down -v       # ¡borra también Postgres!
+git pull && docker compose up --build -d   # actualizar
 ```
 
-En Windows también: `stop.bat` / `update.bat`.
-
-### Escritorio local (SQLite, cualquier SO)
+### Escritorio local (SQLite, desarrollo)
 
 ```bash
 python3 -m venv .venv

@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
   Instala prerequisitos de AlejandrISBN en Windows: Brave, Git y Docker Desktop.
@@ -10,7 +10,7 @@
 
 .NOTES
   Tras Docker Desktop suele hacer falta reiniciar y abrir Docker Desktop
-  antes de usar start.bat.
+  antes de: docker compose up --build -d
 #>
 
 $ErrorActionPreference = "Continue"
@@ -190,7 +190,9 @@ Write-Host "  1. Si Docker Desktop lo pide, reinicia el PC."
 Write-Host "  2. Abre Docker Desktop y espera a que este en marcha (icono de ballena)."
 Write-Host "  3. Si aun no tienes el repo:"
 Write-Host "       git clone https://github.com/pabloqpacin/AlejandrISBN.git"
-Write-Host "  4. Entra en la carpeta AlejandrISBN y ejecuta start.bat"
+Write-Host "  4. Entra en la carpeta del repo y arranca:"
+Write-Host "       copy .env.example .env"
+Write-Host "       docker compose up --build -d"
 Write-Host "  5. Abre http://localhost:8000 en Brave (u otro navegador)."
 Write-Host ""
 Write-Host "Guia completa: docs\SELFHOSTING.md"

@@ -5,7 +5,7 @@ Triggers (first match wins):
 1. ``DATABASE_URL`` starts with ``sqlite`` → SQLite at that path
 2. ``DATABASE_URL`` starts with ``postgres`` → PostgreSQL (Docker Compose default)
 3. ``ALEJANDRISBN_BACKEND=sqlite`` → SQLite at the OS user-data path
-   (Windows build / ``start-desktop.bat`` / Linux desktop-style runs)
+   (Windows build / ``ALEJANDRISBN_BACKEND=sqlite`` / Linux desktop-style runs)
 4. any other ``DATABASE_URL`` → treated as PostgreSQL
 5. nothing set → PostgreSQL localhost default (dev without Compose URL)
 
