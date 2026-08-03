@@ -107,4 +107,11 @@ async def lookup_isbn(isbn: str) -> dict:
     if not merged.get("cover_url"):
         plain = (to_isbn13(isbn) or isbn).replace("-", "")
         merged["cover_url"] = f"https://covers.openlibrary.org/b/isbn/{plain}-L.jpg"
+
+    # Same display form as after save (Surname, Name; …) so the review UI matches inventory.
+    from app.schemas import normalize_authors, normalize_labels
+
+    merged["authors"] = normalize_authors(merged.get("authors"))
+    if merged.get("genre"):
+        merged["genre"] = normalize_labels(merged.get("genre"))
     return merged
