@@ -12,7 +12,7 @@ Para tu colega / PCs modestos: un **icono en el Escritorio**.
 6. Para salir: **cierra la ventanita** “AlejandrISBN” (no hace falta tocar `.bat`)
 
 **Datos:** `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`  
-**Restaurar un JSON:** crea la carpeta `seed` junto al `.exe`, copia ahí el JSON, y vuelve a abrir la app.
+**Restaurar un JSON:** en el ZIP ya viene la carpeta `seed\` (con `README.txt`). Copia ahí el JSON y vuelve a abrir el `.exe`.
 
 No hace falta instalar Python ni Docker. El `.exe` lleva todo embebido (~4 GB RAM del PC bastan).
 

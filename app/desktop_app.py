@@ -56,6 +56,41 @@ def _app_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _ensure_user_seed_dir() -> None:
+    """Create seed/ next to the .exe with a short README (first run / missing folder)."""
+    seed = _app_dir() / "seed"
+    try:
+        seed.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        _log(f"Could not create seed dir: {exc}")
+        return
+
+    readme = seed / "README.txt"
+    if readme.exists():
+        return
+
+    bundled = None
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidate = Path(sys._MEIPASS) / "packaging" / "windows-seed-README.txt"
+        if candidate.is_file():
+            bundled = candidate
+    repo_copy = _app_dir() / "packaging" / "windows-seed-README.txt"
+    if bundled is None and repo_copy.is_file():
+        bundled = repo_copy
+
+    try:
+        if bundled is not None:
+            readme.write_text(bundled.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            readme.write_text(
+                "Pon aquí un JSON exportado y reinicia AlejandrISBN para importarlo.\n",
+                encoding="utf-8",
+            )
+        _log(f"Created {readme}")
+    except Exception as exc:
+        _log(f"Could not write seed README: {exc}")
+
+
 def _configure_env() -> None:
     """Force SQLite desktop mode and sensible paths before importing the app."""
     os.environ.setdefault("ALEJANDRISBN_BACKEND", "sqlite")
@@ -63,6 +98,9 @@ def _configure_env() -> None:
         os.environ.pop("DATABASE_URL", None)
     if not os.environ.get("DATABASE_URL"):
         os.environ["ALEJANDRISBN_BACKEND"] = "sqlite"
+
+    if getattr(sys, "frozen", False):
+        _ensure_user_seed_dir()
 
     app_dir = _app_dir()
     user_seed = app_dir / "seed"

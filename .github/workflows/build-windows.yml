@@ -31,6 +31,12 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller alejandrisbn.spec
 
+      - name: Add seed folder + README next to the exe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/AlejandrISBN/seed | Out-Null
+          Copy-Item -Force packaging/windows-seed-README.txt dist/AlejandrISBN/seed/README.txt
+
       - name: Zip portable app
         shell: pwsh
         run: |
@@ -59,4 +65,5 @@ jobs:
 
             Datos: `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`
 
+            Para cargar un JSON: ponlo en la carpeta `seed\` (junto al `.exe`) y reinicia.
             Guía: `docs/SELFHOSTING.md`

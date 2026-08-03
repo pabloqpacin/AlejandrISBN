@@ -9,7 +9,7 @@ from pathlib import Path
 
 block_cipher = None
 
-datas = [("static", "static")]
+datas = [("static", "static"), ("packaging/windows-seed-README.txt", "packaging")]
 seed_dir = Path("seed")
 if seed_dir.is_dir():
     for path in seed_dir.iterdir():
