@@ -13,6 +13,12 @@ const enrichBtn = document.getElementById("enrich-btn");
 const enrichDialog = document.getElementById("enrich-dialog");
 const enrichBody = document.getElementById("enrich-body");
 const enrichClose = document.getElementById("enrich-close");
+const batchBar = document.getElementById("batch-bar");
+const batchCount = document.getElementById("batch-count");
+const selectAllVisible = document.getElementById("select-all-visible");
+const batchDialog = document.getElementById("batch-dialog");
+const batchBody = document.getElementById("batch-body");
+const batchClose = document.getElementById("batch-close");
 let importAccept = ".json,application/json";
 const bookTbody = document.getElementById("book-tbody");
 const listMeta = document.getElementById("list-meta");
@@ -51,7 +57,8 @@ const GROUP_LABELS = {
   collection: "colección",
 };
 
-const COL_COUNT = 13;
+const COL_COUNT = 14;
+const selectedIsbns = new Set();
 
 let books = [];
 let searchTimer = null;
@@ -601,7 +608,17 @@ function findBook(isbn) {
 
 function bookRowHtml(book) {
   const fav = Boolean(book.favourite);
+  const checked = selectedIsbns.has(book.isbn) ? "checked" : "";
   return `
+    <td class="col-select">
+      <input
+        type="checkbox"
+        class="row-select"
+        data-select-isbn="${escapeHtml(book.isbn)}"
+        ${checked}
+        aria-label="Seleccionar ${escapeHtml(book.title || book.isbn)}"
+      />
+    </td>
     <td class="col-fav">
       <button
         type="button"
@@ -759,10 +776,168 @@ function renderList() {
   const activeGroups = groupByFields.filter((field) => GROUP_LABELS[field]);
   if (activeGroups.length) {
     renderGrouped(rows, activeGroups);
+    updateBatchBar();
     return;
   }
 
   rows.forEach(appendBookRow);
+  updateBatchBar();
+}
+
+function selectedList() {
+  return [...selectedIsbns];
+}
+
+function pruneSelection() {
+  const known = new Set(books.map((book) => book.isbn));
+  for (const isbn of [...selectedIsbns]) {
+    if (!known.has(isbn)) selectedIsbns.delete(isbn);
+  }
+}
+
+function updateBatchBar() {
+  const n = selectedIsbns.size;
+  if (batchCount) {
+    batchCount.textContent = n === 1 ? "1 seleccionado" : `${n} seleccionados`;
+  }
+  if (batchBar) {
+    batchBar.hidden = n === 0;
+    batchBar.classList.toggle("hidden", n === 0);
+  }
+  if (selectAllVisible) {
+    const visible = visibleBooks();
+    const selectedVisible = visible.filter((book) => selectedIsbns.has(book.isbn)).length;
+    selectAllVisible.checked = visible.length > 0 && selectedVisible === visible.length;
+    selectAllVisible.indeterminate =
+      selectedVisible > 0 && selectedVisible < visible.length;
+  }
+}
+
+function setRowSelected(isbn, on) {
+  if (!isbn) return;
+  if (on) selectedIsbns.add(isbn);
+  else selectedIsbns.delete(isbn);
+}
+
+function selectVisibleRows(on) {
+  visibleBooks().forEach((book) => setRowSelected(book.isbn, on));
+  bookTbody.querySelectorAll(".row-select").forEach((cb) => {
+    cb.checked = on;
+  });
+  updateBatchBar();
+}
+
+async function batchDeleteSelected() {
+  const isbns = selectedList();
+  if (!isbns.length || !batchDialog || !batchBody) return;
+
+  batchBody.innerHTML = `
+    <h3 class="enrich-title">Eliminar selección</h3>
+    <p class="enrich-meta">
+      Vas a borrar <strong>${isbns.length}</strong> registro(s) del inventario.
+      Esta acción no se puede deshacer.
+    </p>
+    <div class="enrich-actions">
+      <button type="button" class="btn ghost" data-batch-close>Cancelar</button>
+      <button type="button" class="btn danger" id="batch-delete-confirm">Eliminar</button>
+    </div>`;
+  batchDialog.showModal();
+  batchBody.querySelector("[data-batch-close]")?.addEventListener("click", () => batchDialog.close());
+  batchBody.querySelector("#batch-delete-confirm")?.addEventListener("click", async () => {
+    const btn = batchBody.querySelector("#batch-delete-confirm");
+    if (btn) btn.disabled = true;
+    setStatus(`Eliminando ${isbns.length}…`);
+    try {
+      const res = await fetch("/api/books/batch/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isbns }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus(data.detail || "No se pudo eliminar la selección.", true);
+        return;
+      }
+      isbns.forEach((isbn) => selectedIsbns.delete(isbn));
+      batchDialog.close();
+      setStatus(`Eliminados: ${data.deleted}.`);
+      await loadBooks();
+    } catch {
+      setStatus("Error de red al eliminar.", true);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+}
+
+function openBatchFieldDialog() {
+  const isbns = selectedList();
+  if (!isbns.length || !batchDialog || !batchBody) return;
+  batchBody.innerHTML = `
+    <h3 class="enrich-title">Actualizar campo</h3>
+    <p class="enrich-meta">${isbns.length} registro(s) seleccionados. Se aplicará el mismo valor a todos.</p>
+    <form id="batch-field-form" class="batch-field-form">
+      <label class="field">
+        <span>Campo</span>
+        <select name="field" required>
+          <option value="location" selected>Ubicación</option>
+          <option value="genre">Género</option>
+          <option value="collection">Colección</option>
+          <option value="volume">Volumen</option>
+          <option value="notes">Notas</option>
+          <option value="legal_deposit">Depósito legal</option>
+          <option value="publisher">Editorial</option>
+          <option value="authors">Autores</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Valor</span>
+        <input name="value" type="text" placeholder="p. ej. A1" required />
+      </label>
+      <div class="enrich-actions">
+        <button type="button" class="btn ghost" data-batch-close>Cancelar</button>
+        <button type="submit" class="btn primary">Aplicar</button>
+      </div>
+    </form>`;
+  batchDialog.showModal();
+  batchBody.querySelector("[data-batch-close]")?.addEventListener("click", () => batchDialog.close());
+  batchBody.querySelector("#batch-field-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const field = form.field.value;
+    const value = form.value.value;
+    const applyBtn = form.querySelector('button[type="submit"]');
+    if (applyBtn) applyBtn.disabled = true;
+    setStatus(`Actualizando ${isbns.length}…`);
+    try {
+      const res = await fetch("/api/books/batch/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isbns, fields: { [field]: value } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus(data.detail || "No se pudo actualizar.", true);
+        return;
+      }
+      batchDialog.close();
+      setStatus(`Actualizados: ${data.updated} (${(data.fields || []).join(", ")}).`);
+      await loadBooks();
+    } catch {
+      setStatus("Error de red al actualizar.", true);
+    } finally {
+      if (applyBtn) applyBtn.disabled = false;
+    }
+  });
+}
+
+function batchEnrichSelected() {
+  const isbns = selectedList().filter((isbn) => !String(isbn).toUpperCase().startsWith("LOCAL-"));
+  if (!isbns.length) {
+    setStatus("La selección no tiene ISBN reales (solo LOCAL-…).", true);
+    return;
+  }
+  runEnrichPreview(isbns);
 }
 
 async function toggleFavourite(isbn) {
@@ -1409,8 +1584,16 @@ async function loadBooks() {
     return;
   }
   books = await res.json();
+  pruneSelection();
   renderList();
 }
+
+bookTbody.addEventListener("change", (event) => {
+  const cb = event.target.closest(".row-select");
+  if (!cb) return;
+  setRowSelected(cb.getAttribute("data-select-isbn"), cb.checked);
+  updateBatchBar();
+});
 
 bookTbody.addEventListener("click", async (event) => {
   const collapseBtn = event.target.closest("[data-collapse-field]");
@@ -1951,12 +2134,30 @@ function closeOnBackdrop(dialog) {
   });
 }
 
+selectAllVisible?.addEventListener("change", () => {
+  selectVisibleRows(Boolean(selectAllVisible.checked));
+});
+
+document.getElementById("batch-delete")?.addEventListener("click", () => {
+  batchDeleteSelected();
+});
+
+document.getElementById("batch-location")?.addEventListener("click", () => {
+  openBatchFieldDialog();
+});
+
+document.getElementById("batch-enrich")?.addEventListener("click", () => {
+  batchEnrichSelected();
+});
+
 reviewClose.addEventListener("click", () => reviewDialog.close());
 detailClose.addEventListener("click", () => detailDialog.close());
 enrichClose?.addEventListener("click", () => enrichDialog?.close());
+batchClose?.addEventListener("click", () => batchDialog?.close());
 closeOnBackdrop(reviewDialog);
 closeOnBackdrop(detailDialog);
 if (enrichDialog) closeOnBackdrop(enrichDialog);
+if (batchDialog) closeOnBackdrop(batchDialog);
 
 const themeToggle = document.getElementById("theme-toggle");
 const THEME_KEY = "alejandrisbn-theme";

@@ -21,6 +21,7 @@ from app.db import (
     search_clause,
 )
 from app.db import runtime as db_runtime
+from app.routers import batch as batch_router
 from app.routers import enrich as enrich_router
 from app.schemas import (
     BookCreate,
@@ -72,11 +73,13 @@ app = FastAPI(
         {"name": "export", "description": "Descargas del inventario"},
         {"name": "import", "description": "Importar inventario (JSON/CSV, sin red)"},
         {"name": "enrich", "description": "Completar campos vacíos vía catálogos online"},
+        {"name": "batch", "description": "Operaciones sobre varios registros"},
         {"name": "ui", "description": "Frontend estático"},
     ],
 )
 
 app.include_router(enrich_router.router)
+app.include_router(batch_router.router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

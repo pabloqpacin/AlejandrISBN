@@ -64,6 +64,7 @@ a = Analysis(
         "app.services.enrich",
         "app.routers",
         "app.routers.enrich",
+        "app.routers.batch",
         "app.version",
         "app.desktop_app",
     ],
