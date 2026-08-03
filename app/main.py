@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any, Optional
+import sys
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -31,7 +32,15 @@ from app.schemas import (
 )
 from app.services.isbn_lookup import lookup_isbn
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+def _resource_root() -> Path:
+    """Repo root in dev; PyInstaller extract dir when frozen."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent.parent
+
+
+STATIC_DIR = _resource_root() / "static"
 
 
 @asynccontextmanager

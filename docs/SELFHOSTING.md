@@ -1,21 +1,38 @@
 # Instalar AlejandrISBN en tu PC (Windows)
 
-Hay **dos formas** de usarlo en Windows:
+## La forma más fácil (sin Python ni Docker)
 
-| Modo | Para quién | Requisitos | Arranque |
-|------|------------|------------|----------|
-| **Escritorio (SQLite)** | PCs con poca RAM (desde ~4 GB) | Python 3.11+ | `start-desktop.bat` |
-| **Docker (Postgres)** | PCs con ≥8 GB y quien prefiera contenedores | Docker Desktop | `start.bat` |
+Para tu colega / PCs modestos: un **icono en el Escritorio**.
 
-Al terminar abres el inventario en el navegador: [http://localhost:8000](http://localhost:8000)
+1. Descarga **`AlejandrISBN-windows.zip`** desde [Releases](https://github.com/pabloqpacin/AlejandrISBN/releases) (o el artefacto del workflow *build-windows*)
+2. Extrae la carpeta donde quieras (p. ej. `Documents\AlejandrISBN`)
+3. Doble clic en **`AlejandrISBN.exe`**
+4. Se abre el navegador en [http://127.0.0.1:8000](http://127.0.0.1:8000)
+5. La **primera vez** se crea un acceso directo **AlejandrISBN** en el Escritorio
+6. Para salir: **cierra la ventanita** “AlejandrISBN” (no hace falta tocar `.bat`)
+
+**Datos:** `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`  
+**Restaurar un JSON:** crea la carpeta `seed` junto al `.exe`, copia ahí el JSON, y vuelve a abrir la app.
+
+No hace falta instalar Python ni Docker. El `.exe` lleva todo embebido (~4 GB RAM del PC bastan).
+
+---
+
+## Otras formas
+
+| Modo | Para quién | Arranque |
+|------|------------|----------|
+| **ZIP + `.exe`** | Uso diario, no técnicos | `AlejandrISBN.exe` / icono Escritorio |
+| **Python + SQLite** | Desarrollo sin compilar | `start-desktop.bat` |
+| **Docker (Postgres)** | ≥8 GB RAM, contenedores | `start.bat` |
 
 Tus libros se quedan en tu PC. No se suben a ningún servidor externo (salvo consultas opcionales a Open Library / Google Books al buscar un ISBN).
 
 ---
 
-## Recomendado en PCs modestos — modo escritorio (SQLite)
+## Modo desarrollo — Python + SQLite (sin compilar el .exe)
 
-**No hace falta Docker.** La base de datos es un fichero local.
+**No hace falta Docker.** Hace falta Python 3.11+.
 
 ### Requisitos
 
@@ -36,7 +53,13 @@ Tus libros se quedan en tu PC. No se suben a ningún servidor externo (salvo con
 5. Para parar: Ctrl+C en esa ventana, o `stop-desktop.bat`
 
 **Datos:** `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`  
-**Restaurar un JSON de backup:** copia el archivo a la carpeta `seed\` del proyecto y reinicia con `start-desktop.bat` (mismo comportamiento que en Docker; ver más abajo).
+**Restaurar un JSON de backup:** copia el archivo a la carpeta `seed\` del proyecto y reinicia.
+
+Para probar la ventanita de control sin PyInstaller:
+
+```powershell
+.venv\Scripts\python.exe -m app.desktop_app
+```
 
 ---
 

@@ -1,0 +1,62 @@
+# Build Windows desktop .exe (no system Python for end users)
+
+name: build-windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller alejandrisbn.spec
+
+      - name: Zip portable app
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/AlejandrISBN/* -DestinationPath AlejandrISBN-windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlejandrISBN-windows
+          path: AlejandrISBN-windows.zip
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AlejandrISBN-windows.zip
+          generate_release_notes: true
+          body: |
+            ## Windows (sin Docker ni Python)
+
+            1. Descarga `AlejandrISBN-windows.zip`
+            2. Extrae la carpeta donde quieras
+            3. Doble clic en `AlejandrISBN.exe`
+            4. Se abre el navegador; se crea un icono en el Escritorio la primera vez
+            5. Cierra la ventanita de AlejandrISBN para salir
+
+            Datos: `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`
+
+            Guía: `docs/SELFHOSTING.md`

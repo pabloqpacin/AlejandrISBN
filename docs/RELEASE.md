@@ -1,27 +1,30 @@
 # Pipeline y release (borrador)
 #
-# Dos productos de distribución:
-# 1) Escritorio SQLite (PCs modestos) → start-desktop.bat / futuro instalador
-# 2) Self-host Docker (Postgres) → compose + start.bat
-# Guía usuarios: `docs/SELFHOSTING.md`.
+# Producto principal Windows (PCs modestos / no técnicos):
+#   ZIP con AlejandrISBN.exe (PyInstaller) → icono Escritorio, sin Python ni Docker
+# Alternativas:
+#   start-desktop.bat (dev con Python + SQLite)
+#   Docker Compose + Postgres (self-host)
+# Guía: `docs/SELFHOSTING.md`.
 
 ## Flujo propuesto
 
 ```text
-push / PR  →  CI (build imagen + smoke compose; opcional smoke SQLite)
-tag vX.Y.Z →  Release (push GHCR + GitHub Release notes)
-usuario PC flojo → clone/ZIP + Python + start-desktop.bat
-usuario Docker   → clone + start.bat  (o compose up --build)
+push / PR     →  CI Docker smoke
+tag vX.Y.Z    →  build-windows.yml → AlejandrISBN-windows.zip en el Release
+                + release.yml → imagen GHCR (opcional)
+usuario final → descarga ZIP → AlejandrISBN.exe / icono Escritorio
 ```
 
 ## Workflows
 
 | Archivo | Disparador | Qué hace |
 |---------|------------|----------|
-| `.github/workflows/ci.yml` | push/PR a `main` / `develop` | Build Docker + `compose up` + curl `/api/health` |
-| `.github/workflows/release.yml` | tag `v*` | Push a `ghcr.io/<owner>/<repo>` + GitHub Release |
+| `.github/workflows/ci.yml` | push/PR | Build Docker + smoke `/api/health` |
+| `.github/workflows/build-windows.yml` | tag `v*` / manual | PyInstaller → ZIP del `.exe` |
+| `.github/workflows/release.yml` | tag `v*` | Push GHCR + notas |
 
-## Cómo publicar una versión
+## Cómo publicar una versión para tu colega
 
 ```bash
 git checkout main
@@ -30,28 +33,29 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-Comprobar en GitHub → Actions y Packages.
+En Actions debe aparecer **build-windows**; el Release incluirá `AlejandrISBN-windows.zip`.
 
-## Imagen vs build local vs escritorio
+También puedes lanzar *build-windows* a mano (workflow_dispatch) y bajar el artifact sin tag.
 
-| Canal | Cómo |
-|-------|------|
-| Escritorio low-spec | `start-desktop.bat` (SQLite en `%LOCALAPPDATA%`) — **sin Docker** |
-| Self-host no técnico | `docker compose up --build` / `start.bat` |
-| GHCR (opcional) | imagen preconstruida para servidores / usuarios avanzados |
+## Experiencia de usuario (exe)
 
-## Checklist antes del primer tag público
+1. Extrae el ZIP  
+2. Doble clic en `AlejandrISBN.exe`  
+3. Ventanita de control + navegador  
+4. Primera ejecución → acceso directo en Escritorio  
+5. Cerrar la ventanita = salir  
 
-- [ ] Revisar nombre en `LICENSE` (MIT borrador)
-- [ ] README enlaza a `docs/SELFHOSTING.md` (desktop + Docker)
-- [ ] Probar `start-desktop.bat` en Windows con poca RAM
-- [ ] Probar `start.bat` con Docker Desktop
-- [ ] Confirmar que el paquete GHCR es visible si el repo es público
-- [ ] (Siguiente) PyInstaller / instalador NSIS para no exigir Python a mano
+Datos en `%LOCALAPPDATA%\AlejandrISBN\`. No instala Python en el sistema.
 
-## Fuera de alcance de este borrador
+## Checklist
 
-- Instalador `.msi` / MSIX / Store
-- Auto-update sin Git
-- HTTPS / reverse proxy (uso LAN/localhost)
-- Firmas de imagen (cosign) — se puede añadir después
+- [ ] Probar artifact `AlejandrISBN-windows.zip` en un Windows real
+- [ ] SmartScreen: sin firma puede avisar la primera vez (certificado Authenticode = siguiente nivel)
+- [ ] Icono `.ico` custom (opcional)
+- [ ] Probar restore JSON vía carpeta `seed` junto al exe
+
+## Fuera de alcance aún
+
+- MSIX / Microsoft Store
+- Auto-update
+- Firma Authenticode de pago
