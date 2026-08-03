@@ -168,7 +168,11 @@ class SqliteConnection:
         rows = await cursor.fetchall()
         description = cursor.description or []
         keys = [col[0] for col in description]
-        return [dict(zip(keys, row)) for row in rows]
+        result = [dict(zip(keys, row)) for row in rows]
+        # INSERT/UPDATE … RETURNING go through fetch; commit or they vanish on close.
+        if self._autocommit:
+            await self._conn.commit()
+        return result
 
     async def fetchrow(self, query: str, *args: Any) -> Any:
         rows = await self.fetch(query, *args)
