@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .env
 .DS_Store
+data/
 seed/*
 !seed/README.md
 !seed/*.example.json

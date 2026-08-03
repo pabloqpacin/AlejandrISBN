@@ -1,16 +1,25 @@
+from collections import Counter
 from contextlib import asynccontextmanager
 from csv import DictWriter
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-import asyncpg
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from app.database import close_pool, get_db, init_db, init_pool, record_to_dict
+from app.database import (
+    BACKEND,
+    SEARCH_COLUMNS,
+    close_pool,
+    get_db,
+    init_db,
+    init_pool,
+    record_to_dict,
+    search_clause,
+)
 from app.schemas import (
     BookCreate,
     BookOut,
@@ -68,7 +77,7 @@ async def disable_static_cache(request, call_next):
     return response
 
 
-def row_to_book(row: asyncpg.Record) -> BookOut:
+def row_to_book(row: Any) -> BookOut:
     return BookOut(**record_to_dict(row))
 
 
@@ -78,9 +87,9 @@ async def index() -> FileResponse:
 
 
 @app.get("/api/health", tags=["health"])
-async def health(db: asyncpg.Connection = Depends(get_db)) -> dict:
+async def health(db=Depends(get_db)) -> dict:
     await db.fetchval("SELECT 1")
-    return {"status": "ok", "app": "AlejandrISBN", "db": "postgres"}
+    return {"status": "ok", "app": "AlejandrISBN", "db": BACKEND}
 
 
 @app.get("/api/books", response_model=list[BookOut], tags=["books"])
@@ -92,7 +101,7 @@ async def list_books(
     favourite: Optional[bool] = Query(None, description="Filter by favourite flag"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: asyncpg.Connection = Depends(get_db),
+    db=Depends(get_db),
 ) -> list[BookOut]:
     clauses: list[str] = []
     params: list = []
@@ -101,23 +110,7 @@ async def list_books(
     term_clauses: list[str] = []
     for term in terms:
         params.append(f"%{term}%")
-        idx = len(params)
-        term_clauses.append(
-            f"""(
-                unaccent(isbn) ILIKE unaccent(${idx})
-                OR unaccent(title) ILIKE unaccent(${idx})
-                OR unaccent(authors) ILIKE unaccent(${idx})
-                OR unaccent(genre) ILIKE unaccent(${idx})
-                OR unaccent(publisher) ILIKE unaccent(${idx})
-                OR unaccent(location) ILIKE unaccent(${idx})
-                OR unaccent(notes) ILIKE unaccent(${idx})
-                OR unaccent(legal_deposit) ILIKE unaccent(${idx})
-                OR unaccent(collection) ILIKE unaccent(${idx})
-                OR unaccent(volume) ILIKE unaccent(${idx})
-                OR unaccent(translators) ILIKE unaccent(${idx})
-                OR unaccent(original_title) ILIKE unaccent(${idx})
-            )"""
-        )
+        term_clauses.append(search_clause(SEARCH_COLUMNS, len(params)))
     if term_clauses:
         clauses.append(f"({' OR '.join(term_clauses)})")
 
@@ -141,9 +134,7 @@ async def list_books(
 
 
 @app.get("/api/suggestions", tags=["books"])
-async def field_suggestions(
-    db: asyncpg.Connection = Depends(get_db),
-) -> dict:
+async def field_suggestions(db=Depends(get_db)) -> dict:
     """Distinct authors / genre / location / collection values for form autocomplete.
 
     Authors and genre are treated as ``;``-separated labels (one suggestion per label).
@@ -164,16 +155,21 @@ async def field_suggestions(
     async def label_values_for(column: str) -> list[dict]:
         rows = await db.fetch(
             f"""
-            SELECT TRIM(label) AS value, COUNT(*)::int AS count
-            FROM books,
-            LATERAL unnest(string_to_array({column}, ';')) AS label
+            SELECT {column} AS raw
+            FROM books
             WHERE TRIM(COALESCE({column}, '')) <> ''
-              AND TRIM(label) <> ''
-            GROUP BY TRIM(label)
-            ORDER BY count DESC, value ASC
             """
         )
-        return [{"value": row["value"], "count": row["count"]} for row in rows]
+        counts: Counter[str] = Counter()
+        for row in rows:
+            for part in str(row["raw"] or "").split(";"):
+                label = part.strip()
+                if label:
+                    counts[label] += 1
+        return [
+            {"value": value, "count": count}
+            for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        ]
 
     return {
         "authors": await label_values_for("authors"),
@@ -187,7 +183,7 @@ async def field_suggestions(
 @app.get("/api/export/books", tags=["export"])
 async def export_books(
     format: str = Query("json", pattern="^(json|csv)$"),
-    db: asyncpg.Connection = Depends(get_db),
+    db=Depends(get_db),
 ) -> Response:
     """Download full inventory as JSON (seed) or CSV (Sheets/Excel)."""
     rows = await db.fetch("SELECT * FROM books ORDER BY title ASC")
@@ -265,7 +261,7 @@ async def export_books(
 @app.get("/api/books/{isbn}", response_model=BookOut, tags=["books"])
 async def get_book(
     isbn: str,
-    db: asyncpg.Connection = Depends(get_db),
+    db=Depends(get_db),
 ) -> BookOut:
     try:
         clean = normalize_book_key(isbn)
@@ -281,7 +277,7 @@ async def get_book(
 @app.post("/api/books", response_model=BookOut, status_code=201, tags=["books"])
 async def create_book(
     payload: BookCreate,
-    db: asyncpg.Connection = Depends(get_db),
+    db=Depends(get_db),
 ) -> BookOut:
     # Manual entry (no ISBN): magazines, manuals, documents, etc.
     if payload.isbn is None or is_local_id(payload.isbn):
@@ -409,7 +405,7 @@ ALLOWED_UPDATE_FIELDS = {
 async def update_book(
     isbn: str,
     payload: BookUpdate,
-    db: asyncpg.Connection = Depends(get_db),
+    db=Depends(get_db),
 ) -> BookOut:
     try:
         clean = normalize_book_key(isbn)
@@ -451,7 +447,7 @@ async def update_book(
 @app.delete("/api/books/{isbn}", status_code=204, tags=["books"])
 async def delete_book(
     isbn: str,
-    db: asyncpg.Connection = Depends(get_db),
+    db=Depends(get_db),
 ) -> None:
     try:
         clean = normalize_book_key(isbn)

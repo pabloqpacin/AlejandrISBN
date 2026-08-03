@@ -8,7 +8,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Optional
 
-import asyncpg
+from app.database import DbConnection, pool
 
 logger = logging.getLogger("alejandrisbn.seed")
 
@@ -292,7 +292,7 @@ def _manual_book_from_csv(row: dict[str, str]) -> Optional[dict[str, Any]]:
     return book
 
 
-async def _ensure_seed_table(conn: asyncpg.Connection) -> None:
+async def _ensure_seed_table(conn: DbConnection) -> None:
     await conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schema_seeds (
@@ -304,7 +304,7 @@ async def _ensure_seed_table(conn: asyncpg.Connection) -> None:
     )
 
 
-async def _already_applied(conn: asyncpg.Connection, filename: str, checksum: str) -> bool:
+async def _already_applied(conn: DbConnection, filename: str, checksum: str) -> bool:
     row = await conn.fetchrow(
         "SELECT checksum FROM schema_seeds WHERE filename = $1",
         filename,
@@ -312,7 +312,7 @@ async def _already_applied(conn: asyncpg.Connection, filename: str, checksum: st
     return bool(row and row["checksum"] == checksum)
 
 
-async def _mark_applied(conn: asyncpg.Connection, filename: str, checksum: str) -> None:
+async def _mark_applied(conn: DbConnection, filename: str, checksum: str) -> None:
     await conn.execute(
         """
         INSERT INTO schema_seeds (filename, checksum, applied_at)
@@ -326,7 +326,7 @@ async def _mark_applied(conn: asyncpg.Connection, filename: str, checksum: str) 
     )
 
 
-async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -> int:
+async def _insert_books(conn: DbConnection, books: list[dict[str, Any]]) -> int:
     inserted = 0
     for book in books:
         result = await conn.execute(
@@ -367,19 +367,20 @@ async def _insert_books(conn: asyncpg.Connection, books: list[dict[str, Any]]) -
             book["created_at"],
             book["updated_at"],
         )
-        if result == "INSERT 0 1":
+        # asyncpg: "INSERT 0 1"; sqlite rowcount may be 1 or -1 depending on version
+        if result.startswith("INSERT") and not result.rstrip().endswith(" 0"):
             inserted += 1
     return inserted
 
 
-async def _apply_json(conn: asyncpg.Connection, path: Path) -> None:
+async def _apply_json(conn: DbConnection, path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     books = _books_from_json(payload)
     count = await _insert_books(conn, books)
     logger.info("Seed JSON %s: %s book(s) in file, %s inserted", path.name, len(books), count)
 
 
-async def _apply_sql(conn: asyncpg.Connection, path: Path) -> None:
+async def _apply_sql(conn: DbConnection, path: Path) -> None:
     script = path.read_text(encoding="utf-8")
     statements = _split_sql(script)
     for statement in statements:
@@ -387,7 +388,7 @@ async def _apply_sql(conn: asyncpg.Connection, path: Path) -> None:
     logger.info("Seed SQL %s: executed %s statement(s)", path.name, len(statements))
 
 
-async def _apply_csv(conn: asyncpg.Connection, path: Path) -> None:
+async def _apply_csv(conn: DbConnection, path: Path) -> None:
     """ISBN rows → online lookup; rows without ISBN → manual insert (title + optional DL)."""
     from app.services.isbn_lookup import lookup_isbn
 
@@ -470,7 +471,7 @@ def _seed_files() -> list[Path]:
     ]
 
 
-async def apply_seeds(pool: asyncpg.Pool) -> None:
+async def apply_seeds() -> None:
     """
     Apply new/changed files from SEED_DIR.
 
@@ -480,12 +481,18 @@ async def apply_seeds(pool: asyncpg.Pool) -> None:
 
     Tracked in schema_seeds by filename + checksum (re-apply if file changes).
     """
+    from app.database import IS_SQLITE, PgConnection
+
+    if pool is None:
+        raise RuntimeError("Database pool is not initialized")
+
     files = _seed_files()
     if not files:
         logger.info("No seed files found in %s", SEED_DIR)
         return
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as raw:
+        conn: DbConnection = raw if IS_SQLITE else PgConnection(raw)
         await _ensure_seed_table(conn)
         for path in files:
             checksum = _checksum(path)

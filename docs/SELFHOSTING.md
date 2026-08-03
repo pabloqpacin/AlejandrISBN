@@ -1,53 +1,80 @@
 # Instalar AlejandrISBN en tu PC (Windows)
 
-Guía para **self-hosting**: la app y la base de datos corren en tu ordenador con Docker. No hace falta saber programar.
+Hay **dos formas** de usarlo en Windows:
 
-Al terminar podrás abrir el inventario en el navegador: [http://localhost:8000](http://localhost:8000)
+| Modo | Para quién | Requisitos | Arranque |
+|------|------------|------------|----------|
+| **Escritorio (SQLite)** | PCs con poca RAM (desde ~4 GB) | Python 3.11+ | `start-desktop.bat` |
+| **Docker (Postgres)** | PCs con ≥8 GB y quien prefiera contenedores | Docker Desktop | `start.bat` |
 
----
+Al terminar abres el inventario en el navegador: [http://localhost:8000](http://localhost:8000)
 
-## Qué vas a instalar
-
-1. **Brave** (recomendado) — navegador para usar la web en http://localhost:8000  
-2. **Docker Desktop** — ejecuta la aplicación y Postgres de forma aislada  
-3. **Git** — descarga (clona) el código del proyecto  
-4. **AlejandrISBN** — con un doble clic o un comando
-
-Tus libros se guardan en un volumen de Docker en tu PC. No se suben a ningún servidor externo (salvo las consultas opcionales a Open Library / Google Books al buscar un ISBN).
+Tus libros se quedan en tu PC. No se suben a ningún servidor externo (salvo consultas opcionales a Open Library / Google Books al buscar un ISBN).
 
 ---
 
-## Requisitos
+## Recomendado en PCs modestos — modo escritorio (SQLite)
+
+**No hace falta Docker.** La base de datos es un fichero local.
+
+### Requisitos
 
 | Requisito | Notas |
 |-----------|--------|
-| Windows 10 u 11 (64 bits) | Idealmente actualizado (incluye `winget`) |
-| Cuenta de administrador | Para instalar Docker, Git y Brave |
-| ~4 GB de RAM libres | Docker Desktop + la app |
-| Conexión a Internet | Primera instalación y búsquedas ISBN |
+| Windows 10 u 11 (64 bits) | — |
+| **Python 3.11+** | [python.org/downloads](https://www.python.org/downloads/) — marca *Add python.exe to PATH* |
+| ~4 GB de RAM | Suficiente para este modo |
+| Navegador | Brave, Edge, Chrome… |
+| Internet | Solo para instalar y buscar ISBN |
+
+### Pasos
+
+1. Consigue la carpeta del proyecto (`git clone` o ZIP de GitHub) en una ruta normal, p. ej. `Documents\AlejandrISBN`
+2. Doble clic en **`start-desktop.bat`**
+3. La primera vez crea `.venv`, instala dependencias y arranca la app (puede tardar unos minutos)
+4. Se abre [http://127.0.0.1:8000](http://127.0.0.1:8000) — **deja la ventana negra abierta** mientras uses la app
+5. Para parar: Ctrl+C en esa ventana, o `stop-desktop.bat`
+
+**Datos:** `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`  
+**Restaurar un JSON de backup:** copia el archivo a la carpeta `seed\` del proyecto y reinicia con `start-desktop.bat` (mismo comportamiento que en Docker; ver más abajo).
 
 ---
 
-## Opción rápida — PC nuevo (script)
+## Modo Docker (Postgres) — PCs con más recursos
+
+### Qué vas a instalar
+
+1. **Brave** (recomendado) — navegador  
+2. **Docker Desktop** — app + Postgres en contenedores (~8 GB RAM de sistema)  
+3. **Git** — clonar / actualizar el repo  
+4. **AlejandrISBN** — `start.bat`
+
+### Requisitos
+
+| Requisito | Notas |
+|-----------|--------|
+| Windows 10 u 11 (64 bits) | Actualizado (incluye `winget`) |
+| Cuenta de administrador | Para instalar Docker, Git y Brave |
+| **8 GB RAM** (mínimo Docker) | 16 GB recomendado |
+| ~15 GB libres en disco | Imágenes + volumen |
+| Virtualización en BIOS | VT-x / AMD-V |
+| Conexión a Internet | Primera instalación y búsquedas ISBN |
+
+### Opción rápida — PC nuevo (script Docker)
 
 > Estos scripts (`setup-windows.bat` / `.ps1`) **solo funcionan en Windows**. No se pueden ejecutar desde Linux ni desde una terminal WSL sobre la carpeta del repo.
 
-Si ya tienes la carpeta del proyecto (por ejemplo descargaste el **ZIP** desde GitHub, o te pasaron el repo en un USB):
+Si ya tienes la carpeta del proyecto (ZIP o USB):
 
-1. Copia/extrae la carpeta a una ruta Windows normal, p. ej. `C:\Users\TU_USUARIO\Documents\AlejandrISBN`  
-   (evita rutas `\\wsl$\...` si el repo vive en Linux)
-2. En el Explorador de archivos, haz **doble clic** en `setup-windows.bat`
-3. Acepta el aviso de administrador (UAC)
-4. Espera a que instale **Brave**, **Git** y **Docker Desktop**
-5. Si Docker lo pide, **reinicia** el PC
-6. Abre **Docker Desktop** y espera a que esté en marcha
-7. Sigue por [Paso 3 — Clonar el repositorio](#paso-3--clonar-el-repositorio) (si llegaste con ZIP, puedes saltar el clone y usar esa carpeta) y luego `start.bat`
+1. Copia/extrae a p. ej. `C:\Users\TU_USUARIO\Documents\AlejandrISBN` (evita `\\wsl$\...`)
+2. Doble clic en `setup-windows.bat` → acepta UAC
+3. Instala Brave, Git y Docker Desktop; reinicia si Docker lo pide
+4. Abre Docker Desktop y espera a que esté en marcha
+5. Doble clic en `start.bat`
 
-El script usa `winget` (incluido en Windows reciente). Si falla, usa los pasos manuales de abajo.
+**Si el `.bat` no hace nada:** clic derecho → *Ejecutar como administrador*. Si Windows bloquea el archivo: *Propiedades* → *Desbloquear*.
 
-**Si el `.bat` no hace nada o se cierra:** clic derecho → *Ejecutar como administrador*. Si Windows dice que el archivo proviene de otro equipo: clic derecho → *Propiedades* → marca *Desbloquear* → Aceptar, y vuelve a ejecutarlo.
-
-**Plan B** (PowerShell **como administrador**):
+**Plan B** (PowerShell como administrador):
 
 ```powershell
 winget install -e --id Brave.Brave --accept-package-agreements --accept-source-agreements
@@ -55,9 +82,7 @@ winget install -e --id Git.Git --accept-package-agreements --accept-source-agree
 winget install -e --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements
 ```
 
----
-
-## Paso 1 — Instalar Docker Desktop (manual)
+### Paso 1 — Instalar Docker Desktop (manual)
 
 1. Entra en [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
 2. Descarga **Docker Desktop for Windows**
@@ -75,9 +100,7 @@ docker compose version
 
 Si ves números de versión (sin error rojo), Docker está listo.
 
----
-
-## Paso 2 — Instalar Git (manual)
+### Paso 2 — Instalar Git (manual)
 
 1. Entra en [https://git-scm.com/download/win](https://git-scm.com/download/win)
 2. Instala con las opciones por defecto
@@ -89,9 +112,7 @@ Si ves números de versión (sin error rojo), Docker está listo.
 git --version
 ```
 
----
-
-## Paso 3 — Clonar el repositorio
+### Paso 3 — Clonar el repositorio
 
 Elige una carpeta fácil de encontrar, por ejemplo `Documentos`:
 
@@ -105,18 +126,20 @@ Si prefieres no usar Git: en GitHub pulsa **Code → Download ZIP**, descomprím
 
 ---
 
-## Paso 4 — Arrancar (opción fácil)
+## Paso 4 — Arrancar con Docker (opción fácil)
 
 En el Explorador de archivos, entra en la carpeta `AlejandrISBN` y haz **doble clic** en:
 
 | Archivo | Qué hace |
 |---------|----------|
+| `start-desktop.bat` | **Sin Docker:** SQLite + Python (recomendado en PCs modestos) |
+| `stop-desktop.bat` | Intenta liberar el puerto 8000 del modo escritorio |
 | `setup-windows.bat` | (PC nuevo) Instala Brave, Git y Docker Desktop via `winget` |
-| `start.bat` | Crea `.env` si no existe, construye e inicia el stack, abre el navegador |
-| `stop.bat` | Para la aplicación (los libros **no** se borran) |
-| `update.bat` | Descarga cambios del repo y vuelve a levantar el stack |
+| `start.bat` | Docker: crea `.env` si no existe, construye e inicia el stack, abre el navegador |
+| `stop.bat` | Docker: para la aplicación (los libros **no** se borran) |
+| `update.bat` | Docker: descarga cambios del repo y vuelve a levantar el stack |
 
-La **primera** vez `start.bat` puede tardar varios minutos (descarga de imágenes y compilación). Las siguientes serán más rápidas.
+La **primera** vez `start.bat` / `start-desktop.bat` puede tardar varios minutos. Las siguientes serán más rápidas.
 
 Cuando termine, abre: [http://localhost:8000](http://localhost:8000)
 

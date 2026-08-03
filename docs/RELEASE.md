@@ -1,14 +1,17 @@
 # Pipeline y release (borrador)
 #
-# Objetivo: open source + self-host (clonar repo → Docker Compose).
-# Público principal: Windows / usuarios no técnicos → `docs/SELFHOSTING.md`.
+# Dos productos de distribución:
+# 1) Escritorio SQLite (PCs modestos) → start-desktop.bat / futuro instalador
+# 2) Self-host Docker (Postgres) → compose + start.bat
+# Guía usuarios: `docs/SELFHOSTING.md`.
 
 ## Flujo propuesto
 
 ```text
-push / PR  →  CI (build imagen + smoke compose)
+push / PR  →  CI (build imagen + smoke compose; opcional smoke SQLite)
 tag vX.Y.Z →  Release (push GHCR + GitHub Release notes)
-usuario    →  clone + start.bat  (o compose up --build)
+usuario PC flojo → clone/ZIP + Python + start-desktop.bat
+usuario Docker   → clone + start.bat  (o compose up --build)
 ```
 
 ## Workflows
@@ -29,28 +32,26 @@ git push origin v1.0.0
 
 Comprobar en GitHub → Actions y Packages.
 
-## Imagen vs build local
+## Imagen vs build local vs escritorio
 
-Para self-host no técnico **priorizamos `docker compose up --build`** desde el clon:
-
-- No requiere `docker login` a GHCR
-- El código y la versión coinciden con lo clonado
-- Los scripts `start.bat` / `update.bat` ya usan `--build`
-
-GHCR queda como atajo opcional (CI/CD, servidores, usuarios avanzados).  
-Si más adelante quieres arranque sin build, se puede añadir un `docker-compose.image.yml` que solo haga `pull` de `ghcr.io/...:latest`.
+| Canal | Cómo |
+|-------|------|
+| Escritorio low-spec | `start-desktop.bat` (SQLite en `%LOCALAPPDATA%`) — **sin Docker** |
+| Self-host no técnico | `docker compose up --build` / `start.bat` |
+| GHCR (opcional) | imagen preconstruida para servidores / usuarios avanzados |
 
 ## Checklist antes del primer tag público
 
 - [ ] Revisar nombre en `LICENSE` (MIT borrador)
-- [ ] README enlaza a `docs/SELFHOSTING.md`
-- [ ] Probar `start.bat` en un Windows limpio con Docker Desktop
+- [ ] README enlaza a `docs/SELFHOSTING.md` (desktop + Docker)
+- [ ] Probar `start-desktop.bat` en Windows con poca RAM
+- [ ] Probar `start.bat` con Docker Desktop
 - [ ] Confirmar que el paquete GHCR es visible si el repo es público
-- [ ] (Opcional) Añadir badge de CI en el README
+- [ ] (Siguiente) PyInstaller / instalador NSIS para no exigir Python a mano
 
 ## Fuera de alcance de este borrador
 
-- Instalador `.msi` / Store
+- Instalador `.msi` / MSIX / Store
 - Auto-update sin Git
 - HTTPS / reverse proxy (uso LAN/localhost)
 - Firmas de imagen (cosign) — se puede añadir después

@@ -7,20 +7,25 @@ Inventario lean de biblioteca: guarda libros por ISBN y completa título, autor,
 ## Stack
 
 - **API:** FastAPI + Uvicorn
-- **DB:** PostgreSQL 16 (volumen Docker `alejandrisbn_pgdata`)
+- **DB:** PostgreSQL 16 (Docker) **o** SQLite (modo escritorio / PCs modestos)
 - **Frontend:** HTML / CSS / JS vanilla, servido por la misma API (`/` y `/static`)
 
-## Arranque rápido (Docker)
+## Arranque rápido
 
-### Windows (recomendado si no programas)
+### Windows — PCs modestos (recomendado, sin Docker)
 
-1. Consigue la carpeta del repo (`git clone` o ZIP de GitHub)
-2. (PC nuevo) Doble clic en `setup-windows.bat` → instala Brave, Git y Docker Desktop; reinicia si Docker lo pide
-3. Abre Docker Desktop y, en la carpeta del proyecto, doble clic en `start.bat`
+1. Instala [Python 3.11+](https://www.python.org/downloads/) (*Add to PATH*)
+2. Carpeta del repo (`git clone` o ZIP)
+3. Doble clic en **`start-desktop.bat`** → http://127.0.0.1:8000
 
-Detalle paso a paso: **[docs/SELFHOSTING.md](docs/SELFHOSTING.md)**
+Datos en `%LOCALAPPDATA%\AlejandrISBN\alejandrisbn.db`. Guía: **[docs/SELFHOSTING.md](docs/SELFHOSTING.md)**
 
-### Cualquier SO (terminal)
+### Windows — Docker (≥8 GB RAM)
+
+1. (PC nuevo) `setup-windows.bat` → Brave, Git, Docker Desktop
+2. Abre Docker Desktop y doble clic en `start.bat`
+
+### Cualquier SO (Docker)
 
 ```bash
 git clone https://github.com/pabloqpacin/AlejandrISBN.git
@@ -39,6 +44,16 @@ docker compose down -v       # ¡borra también Postgres!
 ```
 
 En Windows también: `stop.bat` / `update.bat`.
+
+### Escritorio local (SQLite, cualquier SO)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+export ALEJANDRISBN_BACKEND=sqlite   # Windows: set ALEJANDRISBN_BACKEND=sqlite
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
 ## Seeds / bootstrap DB
 
