@@ -6,7 +6,10 @@ const formStatus = document.getElementById("form-status");
 const searchInput = document.getElementById("search-input");
 const clearSearchBtn = document.getElementById("clear-search");
 const viewChips = document.getElementById("view-chips");
-const exportMenu = document.querySelector(".export-menu");
+const exportMenu = document.querySelector(".export-menu:not(.import-menu)");
+const importMenu = document.querySelector(".import-menu");
+const importFile = document.getElementById("import-file");
+let importAccept = ".json,application/json";
 const bookTbody = document.getElementById("book-tbody");
 const listMeta = document.getElementById("list-meta");
 const emptyState = document.getElementById("empty-state");
@@ -1590,6 +1593,59 @@ exportMenu?.querySelectorAll("[data-export]").forEach((btn) => {
     event.preventDefault();
     exportInventory(btn.getAttribute("data-export"));
   });
+});
+
+async function importInventoryFile(file) {
+  if (!file) return;
+  const optionButtons = importMenu?.querySelectorAll(".export-option") || [];
+  optionButtons.forEach((btn) => {
+    btn.disabled = true;
+  });
+  setStatus(`Importando ${file.name}…`);
+  try {
+    const body = new FormData();
+    body.append("file", file, file.name);
+    const res = await fetch("/api/import/books", { method: "POST", body });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = Array.isArray(data.detail)
+        ? data.detail.map((d) => d.msg || d).join("; ")
+        : data.detail;
+      setStatus(detail || "No se pudo importar el archivo.", true);
+      return;
+    }
+    const fmt = (data.format || "").toUpperCase();
+    setStatus(
+      `Importado${fmt ? ` (${fmt})` : ""}: ${data.inserted} nuevos, ${data.skipped} ya existían (${data.parsed} en el archivo).`
+    );
+    await loadBooks();
+  } catch {
+    setStatus("Error de red al importar.", true);
+  } finally {
+    optionButtons.forEach((btn) => {
+      btn.disabled = false;
+    });
+    importFile.value = "";
+  }
+}
+
+importMenu?.querySelectorAll("[data-import]").forEach((btn) => {
+  btn.addEventListener("click", (event) => {
+    event.preventDefault();
+    const format = btn.getAttribute("data-import");
+    if (format === "csv") {
+      importAccept = ".csv,text/csv";
+    } else {
+      importAccept = ".json,application/json";
+    }
+    importFile.accept = importAccept;
+    importFile.click();
+  });
+});
+
+importFile?.addEventListener("change", () => {
+  const file = importFile.files?.[0];
+  if (file) importInventoryFile(file);
 });
 
 function closeOnBackdrop(dialog) {

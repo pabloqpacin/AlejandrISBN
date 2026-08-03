@@ -99,6 +99,7 @@ Docs: http://localhost:8000/docs
 | `PATCH` | `/api/books/{isbn}` | Actualizar campos |
 | `DELETE` | `/api/books/{isbn}` | Eliminar |
 | `GET` | `/api/export/books?format=json\|csv` | Descargar inventario (JSON seed o CSV) |
+| `POST` | `/api/import/books` | Importar JSON (multipart `file`) |
 | `GET` | `/api/lookup/{isbn}` | Preview sin guardar |
 
 ### Ejemplo POST

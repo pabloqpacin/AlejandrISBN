@@ -10,7 +10,8 @@
 6. Para quitar la app: Ajustes → Aplicaciones → AlejandrISBN → Desinstalar  
    (los libros en `%LOCALAPPDATA%\AlejandrISBN\` **no** se borran)
 
-**Restaurar un JSON:** en la carpeta de instalación hay `seed\` con `README.txt`. Copia ahí el JSON y reinicia la app.
+**Restaurar un JSON:** con la app abierta, usa **Importar** (junto a Exportar).  
+También puedes dejar el JSON en `seed\` y reiniciar (ver `README.txt` ahí).
 
 No hace falta Python ni Docker. Inno Setup / el build son **gratis** (sin certificado de firma; Windows puede avisar “origen desconocido” la primera vez — *Más información → Ejecutar de todas formas*).
 

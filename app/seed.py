@@ -143,6 +143,93 @@ def _books_from_json(payload: Any) -> list[dict[str, Any]]:
     return cleaned
 
 
+def _books_from_import_csv(text: str) -> list[dict[str, Any]]:
+    """Parse an export-style CSV (full inventory columns) into book rows for insert."""
+    from app.schemas import generate_local_id, is_local_id, normalize_authors, normalize_labels
+
+    reader = DictReader(StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("CSV sin cabecera")
+
+    fields = {name.strip().lower(): name for name in reader.fieldnames if name}
+    if "title" not in fields and "isbn" not in fields:
+        raise ValueError("CSV debe incluir columna 'title' y/o 'isbn'")
+
+    cleaned: list[dict[str, Any]] = []
+    for raw in reader:
+        row = {
+            key: (raw.get(original) or "").strip()
+            for key, original in fields.items()
+        }
+        if not any(_optional_text(v) for v in row.values()):
+            continue
+
+        title = _optional_text(row.get("title"))
+        raw_isbn = _optional_text(row.get("isbn"))
+
+        if not title and not raw_isbn:
+            continue
+
+        if not raw_isbn:
+            isbn = generate_local_id()
+        elif is_local_id(raw_isbn):
+            isbn = raw_isbn.upper()
+        else:
+            isbn = _normalize_isbn(raw_isbn)
+            if len(isbn) not in (10, 13):
+                logger.warning("CSV import: skipping invalid ISBN %r", row.get("isbn"))
+                continue
+
+        if not title:
+            title = isbn
+
+        year = None
+        year_raw = _optional_text(row.get("publication_year") or row.get("year") or "")
+        if year_raw:
+            try:
+                year = int(float(year_raw))
+            except ValueError:
+                year = None
+
+        original_year = None
+        oy_raw = _optional_text(row.get("original_year") or "")
+        if oy_raw:
+            try:
+                original_year = int(float(oy_raw))
+            except ValueError:
+                original_year = None
+
+        cleaned.append(
+            {
+                "isbn": isbn,
+                "title": title,
+                "authors": normalize_authors(row.get("authors")),
+                "publication_year": year,
+                "genre": normalize_labels(row.get("genre")),
+                "publisher": _optional_text(row.get("publisher")),
+                "cover_url": _optional_text(row.get("cover_url")),
+                "description": _optional_text(row.get("description")),
+                "location": _optional_text(row.get("location")),
+                "notes": _optional_text(row.get("notes")),
+                "legal_deposit": _legal_deposit_from_row(row),
+                "collection": _optional_text(row.get("collection") or row.get("coleccion")),
+                "volume": _optional_text(row.get("volume") or row.get("volumen") or row.get("tomo")),
+                "original_year": original_year,
+                "translators": normalize_labels(row.get("translators") or row.get("traductores")),
+                "original_title": _optional_text(
+                    row.get("original_title") or row.get("titulo_original")
+                ),
+                "favourite": _parse_bool(row["favourite"])
+                if "favourite" in row and _optional_text(row.get("favourite")) != ""
+                else False,
+                "source": _optional_text(row.get("source")) or "import",
+                "created_at": _parse_ts(row.get("created_at")),
+                "updated_at": _parse_ts(row.get("updated_at")),
+            }
+        )
+    return cleaned
+
+
 def _csv_rows(path: Path) -> list[dict[str, str]]:
     text = path.read_text(encoding="utf-8-sig")
     reader = DictReader(StringIO(text))

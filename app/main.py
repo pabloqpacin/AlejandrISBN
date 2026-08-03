@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 import sys
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -69,6 +69,7 @@ app = FastAPI(
         {"name": "books", "description": "CRUD e inventario"},
         {"name": "lookup", "description": "Metadatos online por ISBN (sin guardar)"},
         {"name": "export", "description": "Descargas del inventario"},
+        {"name": "import", "description": "Importar inventario (JSON seed)"},
         {"name": "ui", "description": "Frontend estático"},
     ],
 )
@@ -265,6 +266,63 @@ async def export_books(
     response = JSONResponse(content={"books": books})
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+@app.post("/api/import/books", tags=["import"])
+async def import_books(
+    file: UploadFile = File(..., description="JSON or CSV export/seed"),
+    db=Depends(get_db),
+) -> dict:
+    """Import books from a JSON or CSV file (same shapes as ``/api/export/books``).
+
+    Existing ISBNs are skipped (``ON CONFLICT DO NOTHING``).
+    """
+    import json
+
+    from app.seed import _books_from_import_csv, _books_from_json, _insert_books
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Codificación inválida: {exc}") from exc
+
+    name = (file.filename or "").lower()
+    ctype = (file.content_type or "").lower()
+    is_csv = name.endswith(".csv") or "csv" in ctype
+    is_json = name.endswith(".json") or "json" in ctype
+
+    if not is_csv and not is_json:
+        # sniff
+        stripped = text.lstrip()
+        is_json = stripped.startswith("{") or stripped.startswith("[")
+        is_csv = not is_json
+
+    try:
+        if is_csv:
+            books = _books_from_import_csv(text)
+        else:
+            books = _books_from_json(json.loads(text))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"JSON inválido: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not books:
+        raise HTTPException(status_code=400, detail="No hay libros válidos en el archivo")
+
+    for book in books:
+        if not book.get("source") or book["source"] in {"seed", "seed-csv:lookup", "seed-csv:manual"}:
+            book["source"] = "import"
+
+    inserted = await _insert_books(db, books)
+    return {
+        "ok": True,
+        "format": "csv" if is_csv else "json",
+        "parsed": len(books),
+        "inserted": inserted,
+        "skipped": len(books) - inserted,
+    }
 
 
 @app.get("/api/books/{isbn}", response_model=BookOut, tags=["books"])

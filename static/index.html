@@ -21,7 +21,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/styles.css?v=20260803a" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=20260803d" />
 </head>
 <body>
   <div class="atmosphere" aria-hidden="true"></div>
@@ -73,6 +73,16 @@
           />
         </label>
         <button type="button" id="clear-search" class="btn ghost compact hidden">Limpiar</button>
+        <div class="export-menu import-menu">
+          <button type="button" class="btn ghost compact export-trigger" aria-haspopup="true" aria-expanded="false">
+            Importar
+          </button>
+          <div class="export-options" role="menu">
+            <button type="button" class="export-option" data-import="json" role="menuitem">JSON</button>
+            <button type="button" class="export-option" data-import="csv" role="menuitem">CSV</button>
+          </div>
+        </div>
+        <input type="file" id="import-file" accept=".json,.csv,application/json,text/csv" hidden />
         <div class="export-menu">
           <button type="button" class="btn ghost compact export-trigger" aria-haspopup="true" aria-expanded="false">
             Exportar
@@ -157,6 +167,6 @@
     </div>
   </dialog>
 
-  <script src="/static/js/app.js?v=20260803a" type="module"></script>
+  <script src="/static/js/app.js?v=20260803d" type="module"></script>
 </body>
 </html>
