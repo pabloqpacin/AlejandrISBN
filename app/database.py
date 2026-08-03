@@ -156,7 +156,7 @@ class PgConnection:
 
 
 class SqliteConnection:
-    """Assumes caller serializes access (pool.acquire holds the lock)."""
+    """Wrapper around a short-lived aiosqlite connection (one per acquire)."""
 
     def __init__(self, conn: Any, *, autocommit: bool = True) -> None:
         self._conn = conn
@@ -197,8 +197,7 @@ class SqliteConnection:
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator["SqliteConnection"]:
-        # isolation_level=None (set on connect) → manual BEGIN/commit/rollback
-        await self._conn.execute("BEGIN")
+        # Prefer commit/rollback APIs (thread-safe via aiosqlite) over raw BEGIN SQL.
         txn = SqliteConnection(self._conn, autocommit=False)
         try:
             yield txn
@@ -215,35 +214,56 @@ DbConnection = Union[PgConnection, SqliteConnection]
 
 
 class _SqlitePool:
+    """
+    SQLite access for the desktop/web app.
+
+    Opens a **new** aiosqlite connection per acquire (serialized with a lock).
+    Avoids sharing one sqlite3 connection across Uvicorn/thread boundaries
+    (``ProgrammingError: SQLite objects created in a thread...``).
+    """
+
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._conn: Any = None
         self._lock = asyncio.Lock()
+        self._ready = False
 
     async def open(self) -> None:
         import aiosqlite
 
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = await aiosqlite.connect(str(self.path))
-        self._conn.row_factory = aiosqlite.Row
-        # Manual transactions only (avoids "cannot commit/rollback — no transaction")
-        self._conn.isolation_level = None
-        await self._conn.execute("PRAGMA foreign_keys = ON")
-        await self._conn.execute("PRAGMA journal_mode = WAL")
-        await self._conn.commit()
+
+        # One-shot init (WAL + foreign_keys) on a dedicated connection.
+        conn = await aiosqlite.connect(str(self.path), check_same_thread=False)
+        try:
+            await conn.execute("PRAGMA foreign_keys = ON")
+            await conn.execute("PRAGMA journal_mode = WAL")
+            await conn.commit()
+        finally:
+            await conn.close()
+        self._ready = True
 
     async def close(self) -> None:
-        if self._conn is not None:
-            await self._conn.close()
-            self._conn = None
+        self._ready = False
+
+    async def _connect(self) -> Any:
+        import aiosqlite
+
+        conn = await aiosqlite.connect(str(self.path), check_same_thread=False)
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA foreign_keys = ON")
+        return conn
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[SqliteConnection]:
-        if self._conn is None:
+        if not self._ready:
             raise RuntimeError("SQLite pool is not initialized")
         async with self._lock:
-            yield SqliteConnection(self._conn, autocommit=True)
+            conn = await self._connect()
+            try:
+                yield SqliteConnection(conn, autocommit=True)
+            finally:
+                await conn.close()
 
 
 # --- lifecycle ---------------------------------------------------------------
