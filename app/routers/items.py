@@ -22,7 +22,6 @@ from app.schemas import (
     is_print_media,
     resolve_placement,
 )
-from app.services.isbn_lookup import lookup_isbn
 
 router = APIRouter(tags=["items"])
 
@@ -249,35 +248,6 @@ async def create_item(payload: ItemCreate, db=Depends(get_db)) -> ItemOut:
         raise HTTPException(status_code=409, detail="Item with this ISBN already in inventory")
 
     try:
-        meta = await lookup_isbn(payload.isbn)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    overrides = payload.model_dump(
-        exclude={
-            "isbn",
-            "media_type",
-            "location",
-            "room",
-            "furniture",
-            "notes",
-            "legal_deposit",
-            "collection",
-            "volume",
-            "original_year",
-            "translators",
-            "original_title",
-            "favourite",
-        },
-        exclude_none=True,
-    )
-    for key, value in overrides.items():
-        if isinstance(value, str):
-            value = value.strip()
-        if value not in (None, ""):
-            meta[key] = value
-
-    try:
         row = await db.fetchrow(
             """
             INSERT INTO items (
@@ -292,13 +262,13 @@ async def create_item(payload: ItemCreate, db=Depends(get_db)) -> ItemOut:
             item_id,
             payload.media_type.value,
             payload.isbn,
-            meta["title"],
-            meta.get("authors") or "",
-            meta.get("publication_year"),
-            meta.get("genre") or "",
-            meta.get("publisher") or "",
-            meta.get("cover_url") or "",
-            meta.get("description") or "",
+            (payload.title or "").strip(),
+            (payload.authors or "").strip(),
+            payload.publication_year,
+            (payload.genre or "").strip(),
+            (payload.publisher or "").strip(),
+            (payload.cover_url or "").strip(),
+            (payload.description or "").strip(),
             payload.location or "",
             payload.room or "",
             payload.furniture or "",
@@ -310,7 +280,7 @@ async def create_item(payload: ItemCreate, db=Depends(get_db)) -> ItemOut:
             payload.translators or "",
             payload.original_title or "",
             payload.favourite,
-            meta.get("source") or "",
+            "manual",
         )
     except Exception as exc:
         # Unique isbn race

@@ -279,8 +279,9 @@ class ItemCreate(BaseModel):
             return self
 
         self.isbn = normalize_isbn(isbn)
-        if title:
-            self.title = title
+        if not title:
+            raise ValueError("title is required when creating with ISBN; use /api/lookup first if needed")
+        self.title = title
         return self
 
 

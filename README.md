@@ -83,7 +83,7 @@ Docs: http://localhost:8000/docs
 | `GET` | `/api/stats` | Totales por tipo y por ubicación |
 | `GET` | `/api/items?q=&media_type=` | Listar / buscar |
 | `GET` | `/api/items/{id}` | Detalle |
-| `POST` | `/api/items` | Alta (ISBN lookup solo `book`/`magazine`; resto manual) |
+| `POST` | `/api/items` | Alta directa; para ISBN, guarda los metadatos enviados |
 | `PATCH` | `/api/items/{id}` | Actualizar campos |
 | `DELETE` | `/api/items/{id}` | Eliminar |
 | `POST` | `/api/items/batch/delete` | Borrado masivo (`ids`) |
